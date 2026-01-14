@@ -41,7 +41,7 @@ test_e2e() {
         return
     fi
     
-    # Execute
+    # Execute via interpreter
     local result
     result=$(echo "$bcl" | "$EEZOC" -x bcl 2>&1)
     if [ $? -ne 0 ]; then
@@ -53,6 +53,56 @@ test_e2e() {
         pass "$name"
     else
         fail "$name" "$expected" "$result"
+    fi
+    
+    result=$(echo "$bcl" | "$EEZOC" -x bcl -j 2>&1)
+    if [ $? -ne 0 ]; then
+        fail "$name (jit-exec)" "$expected" "EXEC_ERROR: $result"
+        return
+    fi
+    
+    if [ "$result" = "$expected" ]; then
+        pass "$name (jit)"
+    else
+        fail "$name (jit)" "$expected" "$result"
+    fi
+
+    result=$(echo "$bcl" | "$EEZOC" -x bcl -n 2>&1)
+    if [ $? -ne 0 ]; then
+        fail "$name (native-exec)" "$expected" "EXEC_ERROR: $result"
+        return
+    fi
+    
+    if [ "$result" = "$expected" ]; then
+        pass "$name (native)"
+    else
+        fail "$name (native)" "$expected" "$result"
+    fi
+    
+    # Execute via ELF
+    local elf_file
+    elf_file=$(mktemp)
+    if ! echo "$bcl" | "$EEZOC" -x bcl -e > "$elf_file" 2>&1; then
+        fail "$name (elf-emit)" "$expected" "ELF_EMIT_ERROR"
+        rm -f "$elf_file"
+        return
+    fi
+    chmod +x "$elf_file"
+    
+    local elf_result
+    elf_result=$("$elf_file" 2>&1)
+    local elf_exit=$?
+    rm -f "$elf_file"
+    
+    if [ $elf_exit -ne 0 ]; then
+        fail "$name (elf-exec)" "$expected" "ELF_EXEC_ERROR (exit $elf_exit)"
+        return
+    fi
+    
+    if [ "$elf_result" = "$expected" ]; then
+        pass "$name (elf)"
+    else
+        fail "$name (elf)" "$expected" "$elf_result"
     fi
 }
 
