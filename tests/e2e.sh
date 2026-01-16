@@ -68,6 +68,44 @@ test_e2e() {
     else
         fail "$name (simple)" "$expected" "$result"
     fi
+    
+    # Test with native JIT
+    result=$(echo "$bcl" | "$EEZO" -f bcl -n 2>&1)
+    if [ $? -ne 0 ]; then
+        fail "$name (native)" "$expected" "EXEC_ERROR: $result"
+        return
+    fi
+    
+    if [ "$result" = "$expected" ]; then
+        pass "$name (native)"
+    else
+        fail "$name (native)" "$expected" "$result"
+    fi
+    
+    # Test ELF emission and execution
+    local elf_tmp=$(mktemp)
+    echo -e "$source" | "$EEZOC" -f elf > "$elf_tmp" 2>&1
+    if [ $? -ne 0 ]; then
+        fail "$name (elf compile)" "$expected" "ELF_COMPILE_ERROR"
+        rm -f "$elf_tmp"
+        return
+    fi
+    
+    chmod +x "$elf_tmp"
+    result=$("$elf_tmp" 2>&1)
+    local elf_exit=$?
+    rm -f "$elf_tmp"
+    
+    if [ $elf_exit -ne 0 ]; then
+        fail "$name (elf)" "$expected" "ELF_EXEC_ERROR (exit $elf_exit): $result"
+        return
+    fi
+    
+    if [ "$result" = "$expected" ]; then
+        pass "$name (elf)"
+    else
+        fail "$name (elf)" "$expected" "$result"
+    fi
 }
 
 # Test compile-only (no execution)
