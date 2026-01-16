@@ -12,6 +12,7 @@
 #include <libeezo/term.h>
 #include <libeezo/bcl.h>
 #include <libeezo/jomplement.h>
+#include <libeezo/native.h>
 #include "ast.h"
 #include "bracket.h"
 #include "compile.h"
@@ -366,6 +367,7 @@ typedef enum {
     EMIT_BCL,
     EMIT_JOT,
     EMIT_JOMPLEMENT,
+    EMIT_ELF,
 } EmitMode;
 
 /* Compile files with import resolution */
@@ -402,6 +404,43 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             fprintf(stderr, "SKI: ");
             ski_fprint(stderr, ski);
             fprintf(stderr, "\n");
+        }
+        
+        /* ELF mode - emit standalone executable */
+        if (mode == EMIT_ELF) {
+            /* Allocate code buffer */
+            u32 code_cap = 64 * 1024;
+            u8 *code_buf = malloc(code_cap);
+            if (!code_buf) {
+                fprintf(stderr, "Out of memory\n");
+                free(source);
+                return;
+            }
+            
+            /* Initialize and emit runtime */
+            NativeEmit e;
+            native_emit_init(&e, code_buf, code_cap, OUTPUT_BCL);
+            native_emit_runtime(&e);
+            
+            /* Emit ELF */
+            u8 *elf;
+            u32 elf_size;
+            native_emit_elf(&e, &elf, &elf_size, ski, 16 * 1024 * 1024);
+            
+            if (elf) {
+                /* Write binary to stdout */
+                fwrite(elf, 1, elf_size, stdout);
+                if (verbose) {
+                    fprintf(stderr, "Emitted ELF (%u bytes)\n", elf_size);
+                }
+                free(elf);
+            } else {
+                fprintf(stderr, "ELF emission failed\n");
+            }
+            
+            free(code_buf);
+            free(source);
+            return;
         }
         
         /* Allocate buffer for emission */
@@ -466,10 +505,10 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nEezo compiler - compiles .eezo source to bytecode\n");
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
-    fprintf(stderr, "  -f FORMAT     Output format: bcl (default), jot, jomplement\n");
+    fprintf(stderr, "  -f FORMAT     Output format: bcl (default), jot, jomplement, elf\n");
     fprintf(stderr, "  -h            Show this help\n");
     fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
-    fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
+    fprintf(stderr, "Use 'eezo' to evaluate the compiled output (except for elf).\n");
 }
 
 int main(int argc, char **argv) {
@@ -502,6 +541,8 @@ int main(int argc, char **argv) {
                 mode = EMIT_JOT;
             } else if (strcmp(argv[i], "jomplement") == 0) {
                 mode = EMIT_JOMPLEMENT;
+            } else if (strcmp(argv[i], "elf") == 0) {
+                mode = EMIT_ELF;
             } else {
                 fprintf(stderr, "Unknown format: %s\n", argv[i]);
                 usage(argv[0]);
