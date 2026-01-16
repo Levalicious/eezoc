@@ -1,21 +1,24 @@
 #!/bin/bash
 #
-# Benchmark script for eezoc execution paths
+# Benchmark script for eezo execution paths
 #
-# Compares: interpreter, STG JIT, native JIT, and ELF executable
+# Compares: STG interpreter, simple interpreter, native JIT, and ELF executable
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EEZOC="${SCRIPT_DIR}/../eezoc"
+EEZOC="${SCRIPT_DIR}/../eezoc/eezoc"
+EEZO="${SCRIPT_DIR}/../eezo/eezo"
 ITERATIONS=${1:-3}
 
 # Colors
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
 NC='\033[0m'
 
 echo "========================================"
-echo "eezoc Benchmark Suite"
+echo "eezo Benchmark Suite"
 echo "========================================"
 echo "Iterations per test: $ITERATIONS"
 echo
@@ -30,14 +33,18 @@ time_ms() {
 }
 
 # Run benchmark for all execution paths
-# Args: name, bcl_input
+# Args: name, source
 bench() {
     local name="$1"
-    local bcl="$2"
+    local source="$2"
+    
+    # Compile to BCL
+    local bcl
+    bcl=$(echo -e "$source" | "$EEZOC" 2>/dev/null)
     
     if [ -z "$bcl" ]; then
         echo -e "${CYAN}$name${NC}"
-        echo "  SKIPPED: empty BCL (compile failed?)"
+        echo "  SKIPPED: compile failed"
         echo
         return
     fi
@@ -45,26 +52,55 @@ bench() {
     echo -e "${CYAN}$name${NC}"
     echo "  BCL size: ${#bcl} bits"
     
-    local interp_total=0
-    local jit_total=0
+    # Check parity across all implementations
+    local stg_out simple_out native_out elf_out
+    local elf_file
+    elf_file=$(mktemp)
+    
+    stg_out=$(echo "$bcl" | "$EEZO" -f bcl 2>&1)
+    simple_out=$(echo "$bcl" | "$EEZO" -f bcl -s 2>&1)
+    native_out=$(echo "$bcl" | "$EEZO" -f bcl -n 2>&1)
+    
+    # Compile to ELF from source
+    echo -e "$source" | "$EEZOC" -f elf > "$elf_file" 2>/dev/null
+    chmod +x "$elf_file"
+    elf_out=$("$elf_file" 2>&1)
+    
+    local parity_ok=1
+    
+    if [ "$stg_out" != "$simple_out" ]; then
+        echo -e "  ${RED}PARITY ERROR: STG vs simple disagree${NC}"
+        parity_ok=0
+    fi
+    
+    if [ "$stg_out" != "$native_out" ]; then
+        echo -e "  ${RED}PARITY ERROR: STG vs native disagree${NC}"
+        parity_ok=0
+    fi
+    
+    if [ "$stg_out" != "$elf_out" ]; then
+        echo -e "  ${RED}PARITY ERROR: STG vs ELF disagree${NC}"
+        parity_ok=0
+    fi
+    
+    if [ "$parity_ok" -eq 1 ]; then
+        echo -e "  ${GREEN}Parity: OK${NC}"
+    fi
+    
+    local stg_total=0
+    local simple_total=0
     local native_total=0
     local elf_total=0
     
-    # Create ELF once
-    local elf_file
-    elf_file=$(mktemp)
-    echo "$bcl" | "$EEZOC" -x bcl -e > "$elf_file" 2>/dev/null
-    chmod +x "$elf_file"
-    
     for ((i=0; i<ITERATIONS; i++)); do
-        # Interpreter
-        # interp_total=$((interp_total + $(time_ms bash -c "echo '$bcl' | '$EEZOC' -x bcl")))
+        # STG interpreter
+        stg_total=$((stg_total + $(time_ms bash -c "echo '$bcl' | '$EEZO' -f bcl")))
         
-        # STG JIT
-        jit_total=$((jit_total + $(time_ms bash -c "echo '$bcl' | '$EEZOC' -x bcl -j")))
+        # Simple interpreter
+        simple_total=$((simple_total + $(time_ms bash -c "echo '$bcl' | '$EEZO' -f bcl -s")))
         
         # Native JIT
-        native_total=$((native_total + $(time_ms bash -c "echo '$bcl' | '$EEZOC' -x bcl -j -n")))
+        native_total=$((native_total + $(time_ms bash -c "echo '$bcl' | '$EEZO' -f bcl -n")))
         
         # ELF executable
         elf_total=$((elf_total + $(time_ms "$elf_file")))
@@ -72,27 +108,28 @@ bench() {
     
     rm -f "$elf_file"
     
-    local interp_avg=$((interp_total / ITERATIONS))
-    local jit_avg=$((jit_total / ITERATIONS))
+    local stg_avg=$((stg_total / ITERATIONS))
+    local simple_avg=$((simple_total / ITERATIONS))
     local native_avg=$((native_total / ITERATIONS))
     local elf_avg=$((elf_total / ITERATIONS))
     
-    printf "  %-12s %6d ms (avg)\n" "Interpreter:" "$interp_avg"
-    printf "  %-12s %6d ms (avg)" "STG JIT:" "$jit_avg"
-    [ "$jit_avg" -gt 0 ] && printf "  %.1fx" "$(echo "scale=1; $interp_avg / $jit_avg" | bc 2>/dev/null || echo "?")"
+    printf "  %-12s %6d ms (avg)\n" "Simple:" "$simple_avg"
+    printf "  %-12s %6d ms (avg)" "STG:" "$stg_avg"
+    if [ "$stg_avg" -gt 0 ] && [ "$simple_avg" -gt 0 ]; then
+        printf "  (%.1fx vs Simple)" "$(echo "scale=1; $simple_avg / $stg_avg" | bc 2>/dev/null || echo "?")"
+    fi
     echo
-    printf "  %-12s %6d ms (avg)" "Native JIT:" "$native_avg"
-    [ "$native_avg" -gt 0 ] && printf "  %.1fx" "$(echo "scale=1; $interp_avg / $native_avg" | bc 2>/dev/null || echo "?")"
+    printf "  %-12s %6d ms (avg)" "Native:" "$native_avg"
+    if [ "$native_avg" -gt 0 ] && [ "$simple_avg" -gt 0 ]; then
+        printf "  (%.1fx vs Simple)" "$(echo "scale=1; $simple_avg / $native_avg" | bc 2>/dev/null || echo "?")"
+    fi
     echo
     printf "  %-12s %6d ms (avg)" "ELF:" "$elf_avg"
-    [ "$elf_avg" -gt 0 ] && printf "  %.1fx" "$(echo "scale=1; $interp_avg / $elf_avg" | bc 2>/dev/null || echo "?")"
+    if [ "$elf_avg" -gt 0 ] && [ "$simple_avg" -gt 0 ]; then
+        printf "  (%.1fx vs Simple)" "$(echo "scale=1; $simple_avg / $elf_avg" | bc 2>/dev/null || echo "?")"
+    fi
     echo
     echo
-}
-
-# Compile eezo source to BCL
-compile() {
-    echo -e "$1" | "$EEZOC" 2>/dev/null
 }
 
 #
@@ -190,24 +227,24 @@ thousand := mul(hundred)(ten)'
 echo -e "${YELLOW}=== Iterative Fibonacci (O(n) via Church iteration) ===${NC}"
 echo
 
-bench "fib(10)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(ten)')"
-bench "fib(20)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(twenty)')"
-bench "fib(50)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(fifty)')"
-bench "fib(100)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(hundred)')"
-bench "fib(200)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(twohundred)')"
-bench "fib(500)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(fivehundred)')"
-bench "fib(1000)" "$(compile "${TRIE_FIB_PROG}"$'\nfib(thousand)')"
+bench "fib(10)" "${TRIE_FIB_PROG}"$'\nfib(ten)'
+bench "fib(20)" "${TRIE_FIB_PROG}"$'\nfib(twenty)'
+bench "fib(50)" "${TRIE_FIB_PROG}"$'\nfib(fifty)'
+bench "fib(100)" "${TRIE_FIB_PROG}"$'\nfib(hundred)'
+bench "fib(200)" "${TRIE_FIB_PROG}"$'\nfib(twohundred)'
+bench "fib(500)" "${TRIE_FIB_PROG}"$'\nfib(fivehundred)'
+bench "fib(1000)" "${TRIE_FIB_PROG}"$'\nfib(thousand)'
 
 echo -e "${YELLOW}=== Power of Church Numerals ===${NC}"
 echo
 
-bench "pow(2)(10) = 1024" "$(compile '#import nat
+bench "pow(2)(10) = 1024" '#import nat
 ten := mul(succ(succ(succ(succ(succ(zero))))))(two)
-pow(two)(ten)')"
+pow(two)(ten)'
 
-bench "pow(2)(12) = 4096" "$(compile '#import nat
+bench "pow(2)(12) = 4096" '#import nat
 twelve := mul(succ(succ(succ(succ(succ(succ(zero)))))))(two)
-pow(two)(twelve)')"
+pow(two)(twelve)'
 
 echo "========================================"
 echo "Benchmark complete"
