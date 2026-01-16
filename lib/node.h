@@ -13,7 +13,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include "types.h"
+#include <libeezo/types.h>
 #include "lexeme.h"
 
 typedef struct Node Node;

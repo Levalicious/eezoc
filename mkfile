@@ -7,12 +7,8 @@ OFILES=\
 	ast.$O\
 	bracket.$O\
 	compile.$O\
-	lib/term.$O\
-	lib/bcl.$O\
-	lib/jomplement.$O\
 	lib/lexeme.$O\
 	lib/node.$O\
-	lib/jit.$O\
 	parse/lexeme.$O\
 	parse/tree.$O\
 	parse/stack.$O\
@@ -33,13 +29,8 @@ OFILES=\
 	parse/parse.$O\
 
 HFILES=\
-	lib/types.h\
-	lib/term.h\
-	lib/bcl.h\
-	lib/jomplement.h\
 	lib/lexeme.h\
 	lib/node.h\
-	lib/jit.h\
 	ast.h\
 	bracket.h\
 	compile.h\
@@ -57,6 +48,8 @@ HFILES=\
 	parse/lex/lex.h\
 	parse/opp/operator.h\
 
-CFLAGS=-g -O2 -Wall -I. -DEEZO_GC_DEBUG=1
+CFLAGS=-g -O2 -Wall -I.
+
+LIBS=../libeezo
 
 <$MKROOT/proto/mkone

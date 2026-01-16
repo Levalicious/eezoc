@@ -1,15 +1,17 @@
 /*
- * main.c - Eezo compiler test driver
+ * main.c - Eezo compiler
+ *
+ * Compiles .eezo source files to BCL/Jot/Jomplement bytecode.
+ * Use eezo (the evaluator) to run the compiled output.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include "lib/term.h"
-#include "lib/bcl.h"
-#include "lib/jomplement.h"
-#include "lib/jit.h"
+#include <libeezo/term.h>
+#include <libeezo/bcl.h>
+#include <libeezo/jomplement.h>
 #include "ast.h"
 #include "bracket.h"
 #include "compile.h"
@@ -459,195 +461,15 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
     free(source);
 }
 
-/* Execute a pre-compiled BCL/Jot/Jomplement file (ASCII '0'/'1' format) */
-static void execute_file(const char *path, SKIPool *tp, EmitMode format, int verbose, int use_jit, int use_native, int emit_elf) {
-    FILE *f;
-    int is_stdin = (strcmp(path, "-") == 0);
-    
-    if (is_stdin) {
-        f = stdin;
-    } else {
-        f = fopen(path, "r");
-        if (!f) {
-            fprintf(stderr, "Cannot open %s\n", path);
-            return;
-        }
-    }
-    
-    /* Read ASCII bits, ignoring whitespace and newlines */
-    u8 *bits = malloc(65536);  /* Max ~64K bits */
-    u64 nbits = 0;
-    int c;
-    while ((c = fgetc(f)) != EOF) {
-        if (c == '0' || c == '1') {
-            if (nbits >= 65536 * 8) {
-                fprintf(stderr, "File too large: %s\n", path);
-                free(bits);
-                if (!is_stdin) fclose(f);
-                return;
-            }
-            /* Pack into bytes, MSB first */
-            u64 byte_idx = nbits / 8;
-            int bit_idx = 7 - (nbits % 8);
-            if (bit_idx == 7) bits[byte_idx] = 0;  /* Clear byte on first bit */
-            if (c == '1') bits[byte_idx] |= (1 << bit_idx);
-            nbits++;
-        }
-        /* Ignore whitespace, newlines, etc. */
-    }
-    if (!is_stdin) fclose(f);
-    
-    if (nbits == 0) {
-        fprintf(stderr, "No bits in file: %s\n", path);
-        free(bits);
-        return;
-    }
-    
-    SKITerm *term = NULL;
-    
-    if (format == EMIT_BCL) {
-        BclStream s;
-        bcl_stream_init(&s, bits, nbits);
-        term = bcl_parse(tp, &s);
-        if (verbose) {
-            fprintf(stderr, "Parsed BCL (%llu bits)\n", (unsigned long long)bcl_stream_pos(&s));
-        }
-    } else if (format == EMIT_JOT) {
-        BclStream s;
-        bcl_stream_init(&s, bits, nbits);
-        term = jot_parse(tp, &s);
-        if (verbose) {
-            fprintf(stderr, "Parsed Jot (%llu bits)\n", (unsigned long long)nbits);
-        }
-    } else if (format == EMIT_JOMPLEMENT) {
-        BclStream s;
-        bcl_stream_init(&s, bits, nbits);
-        term = jomplement_parse(tp, &s);
-        if (verbose) {
-            fprintf(stderr, "Parsed Jomplement (%llu bits)\n", (unsigned long long)nbits);
-        }
-    }
-    
-    free(bits);
-    
-    if (!term) {
-        fprintf(stderr, "Parse failed: %s\n", path);
-        return;
-    }
-    
-    if (verbose) {
-        fprintf(stderr, "Parsed: ");
-        ski_fprint(stderr, term);
-        fprintf(stderr, "\n");
-    }
-    
-    /* Execute: STG machine, native code, or standard interpreter */
-    i64 steps;
-    if (emit_elf) {
-        if (verbose) {
-            fprintf(stderr, "Emitting ELF executable...\n");
-        }
-        int rc = jit_emit_elf(STDOUT_FILENO, term);
-        if (rc != 0) {
-            fprintf(stderr, "ELF emission failed\n");
-        } else if (verbose) {
-            fprintf(stderr, "ELF written to stdout\n");
-        }
-        ski_unref(tp, term);
-        return;
-    } else if (use_jit && use_native) {
-        if (verbose) {
-            fprintf(stderr, "Using native x86-64 STG...\n");
-        }
-        SKITerm *result = jit_reduce_native(tp, term, &steps);
-        ski_unref(tp, term);
-        term = result;
-        if (verbose) {
-            fprintf(stderr, "Reduced (%lld steps)\n", (long long)steps);
-        }
-    } else if (use_jit) {
-        if (verbose) {
-            fprintf(stderr, "Using STG machine...\n");
-        }
-        SKITerm *result = jit_reduce(tp, term, &steps);
-        ski_unref(tp, term);
-        term = result;
-        if (verbose) {
-            fprintf(stderr, "Reduced (%lld steps)\n", (long long)steps);
-        }
-    } else {
-        /* Standard interpreter */
-        steps = ski_reduce(tp, &term, 0);  /* 0 = unlimited */
-        if (verbose) {
-            fprintf(stderr, "Reduced (%lld steps)\n", (long long)steps);
-        }
-    }
-    
-    if (verbose) {
-        fprintf(stderr, "Result: ");
-        ski_fprint(stderr, term);
-        fprintf(stderr, "\n");
-    }
-    
-    /* Emit result in same format */
-    u64 size_bits;
-    if (format == EMIT_BCL) {
-        size_bits = bcl_size(term);
-    } else {
-        size_bits = jot_size(term);
-    }
-    u32 buf_size = (size_bits + 7) / 8 + 8;
-    u8 *buf = malloc(buf_size);
-    if (!buf) {
-        fprintf(stderr, "Out of memory\n");
-        ski_unref(tp, term);
-        return;
-    }
-    memset(buf, 0, buf_size);
-    
-    i32 out_bits = -1;
-    switch (format) {
-        case EMIT_BCL: {
-            BclBuffer bb;
-            bcl_buffer_init(&bb, buf, buf_size * 8);
-            if (bcl_emit(term, &bb)) {
-                out_bits = (i32)bcl_buffer_len(&bb);
-            }
-            break;
-        }
-        case EMIT_JOT:
-            out_bits = jot_emit(term, buf, buf_size);
-            break;
-        case EMIT_JOMPLEMENT:
-            out_bits = jomplement_emit(term, buf, buf_size);
-            break;
-    }
-    
-    if (out_bits > 0) {
-        for (int b = 0; b < out_bits; b++) {
-            int byte_idx = b / 8;
-            int bit_idx = 7 - (b % 8);
-            printf("%d", (buf[byte_idx] >> bit_idx) & 1);
-        }
-        printf("\n");
-    } else {
-        fprintf(stderr, "Emission failed\n");
-    }
-    
-    free(buf);
-    ski_unref(tp, term);
-}
-
 static void usage(const char *prog) {
     fprintf(stderr, "Usage: %s [options] < input.eezo\n", prog);
-    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "\nEezo compiler - compiles .eezo source to bytecode\n");
+    fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
     fprintf(stderr, "  -f FORMAT     Output format: bcl (default), jot, jomplement\n");
-    fprintf(stderr, "  -x FORMAT     Execute pre-compiled input (bcl, jot, jomplement)\n");
-    fprintf(stderr, "  -j            JIT compile (with -x)\n");
-    fprintf(stderr, "  -n            Use native x86-64 backend (with -x -j)\n");
-    fprintf(stderr, "  -e            Emit standalone ELF executable to stdout (with -x bcl)\n");
-    fprintf(stderr, "\nInput is always read from stdin.\n");
+    fprintf(stderr, "  -h            Show this help\n");
+    fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
+    fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
 }
 
 int main(int argc, char **argv) {
@@ -658,34 +480,15 @@ int main(int argc, char **argv) {
     ast_pool_init(&ap, 1000000);
     
     int verbose = 0;
-    int use_jit = 0;
-    int use_native = 0;
-    int emit_elf = 0;
     EmitMode mode = EMIT_BCL;
-    EmitMode exec_mode = -1;  /* -1 = not executing */
     
     /* Parse options */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            usage(argv[0]);
+            return 0;
+        } else if (strcmp(argv[i], "-v") == 0) {
             verbose = 1;
-        } else if (strcmp(argv[i], "-x") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Missing argument for -x\n");
-                usage(argv[0]);
-                return 1;
-            }
-            i++;
-            if (strcmp(argv[i], "bcl") == 0) {
-                exec_mode = EMIT_BCL;
-            } else if (strcmp(argv[i], "jot") == 0) {
-                exec_mode = EMIT_JOT;
-            } else if (strcmp(argv[i], "jomplement") == 0) {
-                exec_mode = EMIT_JOMPLEMENT;
-            } else {
-                fprintf(stderr, "Unknown format: %s\n", argv[i]);
-                usage(argv[0]);
-                return 1;
-            }
         } else if (strcmp(argv[i], "-f") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Missing argument for -f\n");
@@ -704,13 +507,6 @@ int main(int argc, char **argv) {
                 usage(argv[0]);
                 return 1;
             }
-        } else if (strcmp(argv[i], "-j") == 0) {
-            use_jit = 1;
-        } else if (strcmp(argv[i], "-n") == 0) {
-            use_native = 1;
-            use_jit = 1;  /* -n implies -j */
-        } else if (strcmp(argv[i], "-e") == 0) {
-            emit_elf = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             usage(argv[0]);
@@ -718,14 +514,9 @@ int main(int argc, char **argv) {
         }
     }
     
-    if (exec_mode != (EmitMode)-1) {
-        /* Execute pre-compiled input from stdin */
-        execute_file("-", &tp, exec_mode, verbose, use_jit, use_native, emit_elf);
-    } else {
-        /* Compile from stdin */
-        char *stdin_path = "-";
-        compile_files(1, &stdin_path, &ap, &tp, verbose, mode);
-    }
+    /* Compile from stdin */
+    char *stdin_path = "-";
+    compile_files(1, &stdin_path, &ap, &tp, verbose, mode);
     
     ast_pool_free(&ap);
     pool_free(&tp);

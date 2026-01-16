@@ -12,7 +12,7 @@
 #define BRACKET_H
 
 #include "ast.h"
-#include "lib/term.h"
+#include <libeezo/term.h>
 
 /*
  * Convert AST to SKI term via bracket abstraction.

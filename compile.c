@@ -9,7 +9,7 @@
  */
 #include "compile.h"
 #include "bracket.h"
-#include "lib/bcl.h"
+#include <libeezo/bcl.h>
 #include <string.h>
 #include <stdio.h>
 

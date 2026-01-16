@@ -8,10 +8,10 @@
 #define COMPILE_H
 
 #include "ast.h"
-#include "lib/bcl.h"
+#include <libeezo/bcl.h>
 
 /* Our SKI term type */
-#include "lib/term.h"
+#include <libeezo/term.h>
 
 /*
  * Compile source string to SKI term.

@@ -9,7 +9,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include "types.h"
+#include <libeezo/types.h>
 
 #define MAX_LEXEME_LENGTH 0xff
 #define MAX_LINE 0xffff

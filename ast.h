@@ -13,7 +13,7 @@
 #ifndef AST_H
 #define AST_H
 
-#include "lib/types.h"
+#include <libeezo/types.h>
 
 typedef enum {
     AST_VAR,        /* Variable reference */
