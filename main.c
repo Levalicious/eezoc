@@ -362,17 +362,26 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
     return buf;
 }
 
-/* Emit mode */
+/* Output encoding */
 typedef enum {
     EMIT_BCL,
     EMIT_JOT,
     EMIT_JOMPLEMENT,
-    EMIT_ELF,
 } EmitMode;
+
+/* Convert EmitMode to OutputFormat for native backend */
+static OutputFormat emit_mode_to_output_format(EmitMode mode) {
+    switch (mode) {
+        case EMIT_BCL: return OUTPUT_BCL;
+        case EMIT_JOT: return OUTPUT_JOT;
+        case EMIT_JOMPLEMENT: return OUTPUT_JOMPLEMENT;
+    }
+    return OUTPUT_BCL;
+}
 
 /* Compile files with import resolution */
 static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
-                          int verbose, EmitMode mode) {
+                          int verbose, EmitMode mode, int emit_elf) {
     /* Resolve imports and toposort */
     int sorted_count;
     char **sorted = resolve_imports(nfiles, files, &sorted_count);
@@ -407,7 +416,7 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
         }
         
         /* ELF mode - emit standalone executable */
-        if (mode == EMIT_ELF) {
+        if (emit_elf) {
             /* Allocate code buffer */
             u32 code_cap = 64 * 1024;
             u8 *code_buf = malloc(code_cap);
@@ -417,9 +426,9 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
                 return;
             }
             
-            /* Initialize and emit runtime */
+            /* Initialize and emit runtime with correct output format */
             NativeEmit e;
-            native_emit_init(&e, code_buf, code_cap, OUTPUT_BCL);
+            native_emit_init(&e, code_buf, code_cap, emit_mode_to_output_format(mode));
             native_emit_runtime(&e);
             
             /* Emit ELF */
@@ -505,10 +514,11 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nEezo compiler - compiles .eezo source to bytecode\n");
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
-    fprintf(stderr, "  -f FORMAT     Output format: bcl (default), jot, jomplement, elf\n");
+    fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement\n");
+    fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -h            Show this help\n");
     fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
-    fprintf(stderr, "Use 'eezo' to evaluate the compiled output (except for elf).\n");
+    fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
 }
 
 int main(int argc, char **argv) {
@@ -520,6 +530,7 @@ int main(int argc, char **argv) {
     
     int verbose = 0;
     EmitMode mode = EMIT_BCL;
+    int emit_elf = 0;
     
     /* Parse options */
     for (int i = 1; i < argc; i++) {
@@ -528,6 +539,8 @@ int main(int argc, char **argv) {
             return 0;
         } else if (strcmp(argv[i], "-v") == 0) {
             verbose = 1;
+        } else if (strcmp(argv[i], "-e") == 0) {
+            emit_elf = 1;
         } else if (strcmp(argv[i], "-f") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Missing argument for -f\n");
@@ -541,8 +554,6 @@ int main(int argc, char **argv) {
                 mode = EMIT_JOT;
             } else if (strcmp(argv[i], "jomplement") == 0) {
                 mode = EMIT_JOMPLEMENT;
-            } else if (strcmp(argv[i], "elf") == 0) {
-                mode = EMIT_ELF;
             } else {
                 fprintf(stderr, "Unknown format: %s\n", argv[i]);
                 usage(argv[0]);
@@ -557,7 +568,7 @@ int main(int argc, char **argv) {
     
     /* Compile from stdin */
     char *stdin_path = "-";
-    compile_files(1, &stdin_path, &ap, &tp, verbose, mode);
+    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf);
     
     ast_pool_free(&ap);
     pool_free(&tp);
