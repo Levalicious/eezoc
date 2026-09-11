@@ -381,7 +381,7 @@ static OutputFormat emit_mode_to_output_format(EmitMode mode) {
 
 /* Compile files with import resolution */
 static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
-                          int verbose, EmitMode mode, int emit_elf, int nf_mode, u32 heap_size) {
+                          int verbose, EmitMode mode, int emit_elf, int nf_mode, u32 heap_size, int io_mode) {
     /* Resolve imports and toposort */
     int sorted_count;
     char **sorted = resolve_imports(nfiles, files, &sorted_count);
@@ -430,6 +430,7 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             NativeEmit e;
             native_emit_init(&e, code_buf, code_cap, emit_mode_to_output_format(mode));
             e.nf_mode = nf_mode;
+            e.io_mode = io_mode;
             native_emit_runtime(&e);
             
             /* Emit ELF */
@@ -519,6 +520,7 @@ static void usage(const char *prog) {
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
+    fprintf(stderr, "  -i            (with -e) stream I/O mode: the executable maps stdin to stdout\n");
     fprintf(stderr, "  -h            Show this help\n");
     fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
     fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
@@ -535,6 +537,7 @@ int main(int argc, char **argv) {
     EmitMode mode = EMIT_BCL;
     int emit_elf = 0;
     int nf_mode = 1;
+    int io_mode = 0;
     u32 heap_size = 16 * 1024 * 1024;
     
     /* Parse options */
@@ -556,6 +559,8 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Heap size too small: %s\n", argv[i]);
                 return 1;
             }
+        } else if (strcmp(argv[i], "-i") == 0) {
+            io_mode = 1;
         } else if (strcmp(argv[i], "-N") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Missing argument for -N\n");
@@ -596,7 +601,7 @@ int main(int argc, char **argv) {
     
     /* Compile from stdin */
     char *stdin_path = "-";
-    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size);
+    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size, io_mode);
     
     ast_pool_free(&ap);
     pool_free(&tp);
