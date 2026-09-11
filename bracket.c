@@ -188,8 +188,11 @@ static Ast* abstract_name(AstPool *pool, Ast *body, Symbol name) {
         return NULL;
     
     case AST_NUM:
+        /* A literal has no free variables: [x]n = K n (n is expanded by ast_to_comb) */
+        return ast_app(pool, noloc, ast_k(pool, noloc), body);
+    
     case AST_STR:
-        fprintf(stderr, "Error: literals should be desugared before bracket abstraction\n");
+        fprintf(stderr, "Error: string literals should be desugared before bracket abstraction\n");
         return NULL;
     }
     return NULL;
