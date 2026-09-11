@@ -381,7 +381,7 @@ static OutputFormat emit_mode_to_output_format(EmitMode mode) {
 
 /* Compile files with import resolution */
 static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
-                          int verbose, EmitMode mode, int emit_elf) {
+                          int verbose, EmitMode mode, int emit_elf, int nf_mode, u32 heap_size) {
     /* Resolve imports and toposort */
     int sorted_count;
     char **sorted = resolve_imports(nfiles, files, &sorted_count);
@@ -429,12 +429,13 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             /* Initialize and emit runtime with correct output format */
             NativeEmit e;
             native_emit_init(&e, code_buf, code_cap, emit_mode_to_output_format(mode));
+            e.nf_mode = nf_mode;
             native_emit_runtime(&e);
             
             /* Emit ELF */
             u8 *elf;
             u32 elf_size;
-            native_emit_elf(&e, &elf, &elf_size, ski, 16 * 1024 * 1024);
+            native_emit_elf(&e, &elf, &elf_size, ski, heap_size);
             
             if (elf) {
                 /* Write binary to stdout */
@@ -516,6 +517,8 @@ static void usage(const char *prog) {
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
     fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
+    fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
+    fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
     fprintf(stderr, "  -h            Show this help\n");
     fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
     fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
@@ -531,6 +534,8 @@ int main(int argc, char **argv) {
     int verbose = 0;
     EmitMode mode = EMIT_BCL;
     int emit_elf = 0;
+    int nf_mode = 1;
+    u32 heap_size = 16 * 1024 * 1024;
     
     /* Parse options */
     for (int i = 1; i < argc; i++) {
@@ -541,6 +546,29 @@ int main(int argc, char **argv) {
             verbose = 1;
         } else if (strcmp(argv[i], "-e") == 0) {
             emit_elf = 1;
+        } else if (strcmp(argv[i], "-H") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Missing argument for -H\n");
+                return 1;
+            }
+            heap_size = (u32)strtoul(argv[i], NULL, 0);
+            if (heap_size < 4096) {
+                fprintf(stderr, "Heap size too small: %s\n", argv[i]);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-N") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Missing argument for -N\n");
+                return 1;
+            }
+            if (strcmp(argv[i], "nf") == 0) {
+                nf_mode = 1;
+            } else if (strcmp(argv[i], "whnf") == 0) {
+                nf_mode = 0;
+            } else {
+                fprintf(stderr, "Unknown normalization mode: %s (nf|whnf)\n", argv[i]);
+                return 1;
+            }
         } else if (strcmp(argv[i], "-f") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Missing argument for -f\n");
@@ -568,7 +596,7 @@ int main(int argc, char **argv) {
     
     /* Compile from stdin */
     char *stdin_path = "-";
-    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf);
+    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size);
     
     ast_pool_free(&ap);
     pool_free(&tp);

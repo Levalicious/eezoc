@@ -29,6 +29,8 @@ OFILES=\
 	parse/parse.$O\
 
 HFILES=\
+	../libeezo/native.h\
+	../libeezo/term.h\
 	lib/lexeme.h\
 	lib/node.h\
 	ast.h\
