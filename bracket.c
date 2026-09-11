@@ -231,11 +231,19 @@ static Ast* ast_to_comb(AstPool *pool, Ast *ast) {
         return NULL;
     
     case AST_NUM: {
-        /* Church numeral: λf.λx.f^n x 
-         * 0 = λf.λx.x = K I
-         * 1 = λf.λx.f x 
-         * 2 = λf.λx.f (f x)
-         * etc.
+        /* Church numeral, built by BINARY expansion so the term is
+         * O(log n) in size instead of the O(n) unary f^n x.
+         *
+         *   ZERO = λf.λx.x
+         *   ONE  = λf.λx.f x
+         *   DBL  = λm.λf.λx. m f (m f x)      (add m m)
+         *   SUCC = λm.λf.λx. f (m f x)
+         *
+         * n is read MSB-first: acc = ONE; for each lower bit:
+         *   acc = DBL acc;  if bit set: acc = SUCC acc.
+         * DBL and SUCC are closed lambdas applied to acc, so each step
+         * adds a constant-size combinator and one application node; the
+         * value is extensionally the same Church numeral as before.
          */
         i64 n = ast->num;
         if (n < 0) {
@@ -243,21 +251,44 @@ static Ast* ast_to_comb(AstPool *pool, Ast *ast) {
             return NULL;
         }
         
-        /* Build f^n x as AST */
         Symbol f_sym = { "f", 1 };
         Symbol x_sym = { "x", 1 };
+        Symbol m_sym = { "m", 1 };
         
-        Ast *body = ast_var(pool, noloc, x_sym);  /* Start with x */
-        for (i64 i = 0; i < n; i++) {
-            body = ast_app(pool, noloc, ast_var(pool, noloc, f_sym), body);  /* f^(i+1) x */
+        #define NUM_VAR(sym) ast_var(pool, noloc, (sym))
+        #define NUM_APP(a, b) ast_app(pool, noloc, (a), (b))
+        #define NUM_ABS(sym, body) ast_abs(pool, noloc, (sym), (body))
+        
+        Ast *acc;
+        if (n == 0) {
+            /* λf.λx.x */
+            acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_VAR(x_sym)));
+        } else {
+            /* λf.λx.f x */
+            acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_APP(NUM_VAR(f_sym), NUM_VAR(x_sym))));
+            int msb = 63 - __builtin_clzll((u64)n);
+            for (int i = msb - 1; i >= 0; i--) {
+                /* DBL acc: λm.λf.λx. m f (m f x) */
+                Ast *mf1 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
+                Ast *mf2 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
+                Ast *dbl = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym,
+                               NUM_APP(mf1, NUM_APP(mf2, NUM_VAR(x_sym))))));
+                acc = NUM_APP(dbl, acc);
+                if ((n >> i) & 1) {
+                    /* SUCC acc: λm.λf.λx. f (m f x) */
+                    Ast *mfx = NUM_APP(NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym)), NUM_VAR(x_sym));
+                    Ast *succ = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym,
+                                    NUM_APP(NUM_VAR(f_sym), mfx))));
+                    acc = NUM_APP(succ, acc);
+                }
+            }
         }
         
-        /* λx. body */
-        Ast *lx = ast_abs(pool, noloc, x_sym, body);
-        /* λf. λx. body */
-        Ast *lf = ast_abs(pool, noloc, f_sym, lx);
+        #undef NUM_VAR
+        #undef NUM_APP
+        #undef NUM_ABS
         
-        return ast_to_comb(pool, lf);
+        return ast_to_comb(pool, acc);
     }
     
     case AST_STR:
