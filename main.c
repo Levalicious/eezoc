@@ -380,14 +380,15 @@ static OutputFormat emit_mode_to_output_format(EmitMode mode) {
 }
 
 /* Compile files with import resolution */
-static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
+/* returns 0 on success, 1 on any failure: the exit status of the compiler (a failed compilation must not look like one) */
+static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
                           int verbose, EmitMode mode, int emit_elf, int nf_mode, u32 heap_size, int io_mode) {
     /* Resolve imports and toposort */
     int sorted_count;
     char **sorted = resolve_imports(nfiles, files, &sorted_count);
     if (!sorted) {
         fprintf(stderr, "Failed to resolve imports\n");
-        return;
+        return 1;
     }
     
     if (verbose) {
@@ -403,7 +404,7 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
     
     if (!source) {
         fprintf(stderr, "Failed to read source files\n");
-        return;
+        return 1;
     }
     
     /* Compile */
@@ -423,7 +424,7 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             if (!code_buf) {
                 fprintf(stderr, "Out of memory\n");
                 free(source);
-                return;
+                return 1;
             }
             
             /* Initialize and emit runtime with correct output format */
@@ -447,11 +448,13 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
                 free(elf);
             } else {
                 fprintf(stderr, "ELF emission failed\n");
+                free(code_buf); free(source);
+                return 1;
             }
             
             free(code_buf);
             free(source);
-            return;
+            return 0;
         }
         
         /* Allocate buffer for emission */
@@ -466,7 +469,7 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
         if (!buf) {
             fprintf(stderr, "Out of memory\n");
             free(source);
-            return;
+            return 1;
         }
         memset(buf, 0, buf_size);
         
@@ -501,14 +504,19 @@ static void compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             printf("\n");
         } else {
             fprintf(stderr, "Emission failed\n");
+            free(buf); free(source);
+            return 1;
         }
         
         free(buf);
     } else {
         fprintf(stderr, "Compilation failed\n");
+        free(source);
+        return 1;
     }
     
     free(source);
+    return 0;
 }
 
 static void usage(const char *prog) {
@@ -601,9 +609,9 @@ int main(int argc, char **argv) {
     
     /* Compile from stdin */
     char *stdin_path = "-";
-    compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size, io_mode);
+    int rc = compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size, io_mode);
     
     ast_pool_free(&ap);
     pool_free(&tp);
-    return 0;
+    return rc;
 }
