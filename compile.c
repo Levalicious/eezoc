@@ -17,6 +17,8 @@
 #include "parse/tree.h"
 #include "parse/array.h"
 #include "parse/term.h"
+#include <stdlib.h>
+#include <string.h>
 #include "parse/parse.h"
 #include "parse/opp/operator.h"
 
@@ -26,11 +28,17 @@ typedef struct BindCtx {
     struct BindCtx *next;
 } BindCtx;
 
-/* Conversion context including globals array */
+/* Conversion context including globals array. A global (a top-level definition) is converted ONCE, on its first
+   reference, and every reference becomes a variable bound by a let around the entry ((\g. body) V): the definition is
+   shared at run time as one thunk. (Converting the referent at every reference inlined it, and a chain of definitions
+   each using the previous one compiled to a term exponential in the length of the chain.) */
 typedef struct {
     AstPool *pool;
     Array *globals;
     BindCtx *bindings;
+    Ast **gast;        /* per global: its converted term (NULL: not referenced yet) */
+    Symbol *gname;     /* per global: the let-bound name ('$' + its name: no source identifier collides) */
+    size_t nglobals;
 } ConvCtx;
 
 /* Forward declarations */
@@ -79,11 +87,21 @@ static Ast *convert_variable(ConvCtx *ctx, Term *term) {
     Lexeme lex = getLexeme(tag);
     long long debruijn = getValue(term);
     
-    /* Global variable reference (negative de Bruijn index) */
+    /* Global variable reference (negative de Bruijn index): converted once, then a let-bound variable */
     if (debruijn < 0) {
-        /* Look up in globals array and recursively convert */
-        Term *global_term = getGlobalReferent(term, ctx->globals);
-        return convert_term_ctx(ctx, global_term);
+        size_t gi = (size_t)(-debruijn - 1);
+        if (gi >= ctx->nglobals) { fprintf(stderr, "Error: global index %zu out of range\n", gi); return NULL; }
+        if (!ctx->gast[gi]) {
+            Symbol name = tag_to_symbol(tag);
+            char *s = malloc(name.len + 2); s[0] = '$'; memcpy(s + 1, name.str, name.len); s[name.len + 1] = 0;
+            ctx->gname[gi] = (Symbol){ s, name.len + 1 };
+            BindCtx *saved = ctx->bindings; ctx->bindings = NULL;   /* a definition is a closed term over the earlier globals */
+            Ast *v = convert_term_ctx(ctx, getGlobalReferent(term, ctx->globals));
+            ctx->bindings = saved;
+            if (!v) return NULL;
+            ctx->gast[gi] = v;
+        }
+        return ast_var(ctx->pool, tag_to_loc(tag), ctx->gname[gi]);
     }
     
     /* Check for built-in combinators (only when de Bruijn index is 0, meaning unbound) */
@@ -187,12 +205,26 @@ static Ast *convert_term_ctx(ConvCtx *ctx, Term *term) {
  * Wrapper for external use (starts with empty context)
  */
 static Ast *convert_term(AstPool *pool, Term *term, Array *globals) {
+    size_t n = globals ? length(globals) : 0;
     ConvCtx ctx = {
         .pool = pool,
         .globals = globals,
-        .bindings = NULL
+        .bindings = NULL,
+        .gast = calloc(n + 1, sizeof(Ast *)),
+        .gname = calloc(n + 1, sizeof(Symbol)),
+        .nglobals = n
     };
-    return convert_term_ctx(&ctx, term);
+    Ast *body = convert_term_ctx(&ctx, term);
+    if (!body) return NULL;
+    /* the referenced globals, bound around the body in definition order (a definition refers only to earlier ones):
+       let g_0 = V_0 in .. let g_k = V_k in body  ==  (\g_0. .. (\g_k. body) V_k ..) V_0 */
+    for (size_t i = n; i-- > 0; ) {
+        if (!ctx.gast[i]) continue;
+        SrcLoc loc = body->loc;
+        body = ast_app(pool, loc, ast_abs(pool, loc, ctx.gname[i], body), ctx.gast[i]);
+    }
+    free(ctx.gast); free(ctx.gname);
+    return body;
 }
 
 /*

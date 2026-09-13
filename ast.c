@@ -175,5 +175,9 @@ void ast_print(Ast *a) {
     case AST_I:
         printf("I");
         break;
+    case AST_B: printf("B"); break;
+    case AST_C: printf("C"); break;
+    case AST_T: printf("T"); break;
+    case AST_R: printf("R"); break;
     }
 }

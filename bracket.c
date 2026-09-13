@@ -57,6 +57,10 @@ static bool resolve_rec(Ast *ast, Env *env) {
     case AST_S:
     case AST_K:
     case AST_I:
+    case AST_B:
+    case AST_C:
+    case AST_T:
+    case AST_R:
     case AST_NUM:
     case AST_STR:
         return true;
@@ -80,229 +84,140 @@ bool bracket_resolve(Ast *ast) {
     return resolve_rec(ast, NULL);
 }
 
-/* Forward declarations */
-static Ast* abstract_name(AstPool *pool, Ast *body, Symbol name);
-static Ast* ast_to_comb(AstPool *pool, Ast *ast);
-static SKITerm* comb_to_term(SKIPool *pool, Ast *comb);
-static bool occurs_free(Ast *ast, Symbol name);
-
-/* Check if variable 'name' occurs free in AST */
-static bool occurs_free(Ast *ast, Symbol name) {
-    switch (ast->tag) {
-    case AST_VAR:
-        return sym_eq(ast->var.name, name);
-    case AST_S:
-    case AST_K:
-    case AST_I:
-    case AST_NUM:
-    case AST_STR:
-        return false;
-    case AST_APP:
-        return occurs_free(ast->app.func, name) || occurs_free(ast->app.arg, name);
-    case AST_ABS:
-        /* Bound by this abstraction - not free */
-        if (sym_eq(ast->abs.param, name)) return false;
-        return occurs_free(ast->abs.body, name);
-    case AST_LET:
-        if (sym_eq(ast->let.name, name)) return occurs_free(ast->let.value, name);
-        return occurs_free(ast->let.value, name) || occurs_free(ast->let.body, name);
-    }
-    return false;
-}
-
-/* 
- * abstract_name: perform [name]body - abstract variable 'name' from body
- * Returns an AST containing only combinators and free variables
+/* ---- lambda to combinators: Kiselyov's algorithm ----
  *
- * Optimizations applied:
- *   η: [x](E x) = E   if x ∉ FV(E)
- *   S(K p)(K q) = K(p q)  -- applied post-hoc
- *   S(K p) I = p          -- applied post-hoc
- */
-static Ast* abstract_name(AstPool *pool, Ast *body, Symbol name) {
-    switch (body->tag) {
-    case AST_VAR:
-        if (sym_eq(body->var.name, name)) {
-            return ast_i(pool, noloc);  /* [x]x = I */
-        } else {
-            /* Different variable, wrap in K */
-            return ast_app(pool, noloc, ast_k(pool, noloc), body);
-        }
-    
-    case AST_S:
-        return ast_app(pool, noloc, ast_k(pool, noloc), ast_s(pool, noloc));
-    case AST_K:
-        return ast_app(pool, noloc, ast_k(pool, noloc), ast_k(pool, noloc));
-    case AST_I:
-        return ast_app(pool, noloc, ast_k(pool, noloc), ast_i(pool, noloc));
-    
-    case AST_APP: {
-        /* η-optimization: [x](E x) = E if x ∉ FV(E) */
-        if (body->app.arg->tag == AST_VAR && 
-            sym_eq(body->app.arg->var.name, name) &&
-            !occurs_free(body->app.func, name)) {
-            return body->app.func;
-        }
-        
-        Ast *f = abstract_name(pool, body->app.func, name);
-        Ast *a = abstract_name(pool, body->app.arg, name);
-        if (!f || !a) return NULL;
-        
-        /* S-optimizations on the result:
-         * S (K p) (K q) = K (p q)
-         * S (K p) I = p
-         * S K x = I (for any x, since S K x y z = K z (x z) = z = I y z)
-         */
-        
-        /* Check for S (K p) I = p */
-        if (a->tag == AST_I && 
-            f->tag == AST_APP && f->app.func->tag == AST_K) {
-            return f->app.arg;
-        }
-        
-        /* Check for S (K p) (K q) = K (p q) */
-        if (f->tag == AST_APP && f->app.func->tag == AST_K &&
-            a->tag == AST_APP && a->app.func->tag == AST_K) {
-            Ast *pq = ast_app(pool, noloc, f->app.arg, a->app.arg);
-            return ast_app(pool, noloc, ast_k(pool, noloc), pq);
-        }
-        
-        /* [x](E F) = S ([x]E) ([x]F) */
-        return ast_app(pool, noloc, 
-                      ast_app(pool, noloc, ast_s(pool, noloc), f), 
-                      a);
-    }
-    
-    case AST_ABS:
-        /* [x](λy.E) = [x]([y]E) 
-         * First abstract inner variable, then outer
-         */
-        {
-            Ast *inner = abstract_name(pool, body->abs.body, body->abs.param);
-            if (!inner) return NULL;
-            return abstract_name(pool, inner, name);
-        }
-    
-    case AST_LET:
-        fprintf(stderr, "Error: LET should be desugared before bracket abstraction\n");
-        return NULL;
-    
-    case AST_NUM:
-        /* A literal has no free variables: [x]n = K n (n is expanded by ast_to_comb) */
-        return ast_app(pool, noloc, ast_k(pool, noloc), body);
-    
-    case AST_STR:
-        fprintf(stderr, "Error: string literals should be desugared before bracket abstraction\n");
-        return NULL;
-    }
-    return NULL;
-}
+ * O. Kiselyov, "lambda to SKI, semantically" (FLOPS 2018), in the form given by Ben Lynn: a subterm is converted to a
+ * pair (g, d) where d is a combinator term closed under the enclosing lambdas and g is a bit list over de Bruijn indices,
+ * g[k] set iff the variable k occurs in the subterm. An abstraction pops the first bit (K when the variable is unused),
+ * and an application combines the two pairs by the rules of `kapp` below, choosing B, C, S or plain application by which
+ * sides use the innermost variable; the eta rule and the T and R combinators (T x f = f x, R x f y = f y x) come from the
+ * eta-optimized variant. The output is linear in the size of the term times its nesting, where the classic
+ * Schoenfinkel abstraction ([x](E F) = S [x]E [x]F, innermost binder first) multiplies the size at every enclosing binder
+ * whose variable occurs inside: the codes eezott emits nest a dozen binders and exhausted the AST pool under it.
+ * B, C, T and R are emitted as their S K terms (comb_to_term), so the encodings and the evaluators are unchanged. */
+typedef struct { unsigned char *g; int n; Ast *d; } KT;   /* g[0..n): bit list, index 0 the innermost variable */
 
-/* Convert AST to combinator-only AST */
-static Ast* ast_to_comb(AstPool *pool, Ast *ast) {
-    switch (ast->tag) {
-    case AST_VAR:
-        /* Free variable - error for closed terms */
-        fprintf(stderr, "Error: free variable '%.*s' in term\n",
-                ast->var.name.len, ast->var.name.str);
-        return NULL;
-    
-    case AST_S:
-    case AST_K:
-    case AST_I:
-        return ast;
-    
-    case AST_APP: {
-        Ast *f = ast_to_comb(pool, ast->app.func);
-        Ast *a = ast_to_comb(pool, ast->app.arg);
-        if (!f || !a) return NULL;
-        return ast_app(pool, noloc, f, a);
+static KT kt(unsigned char *g, int n, Ast *d) { KT t = { g, n, d }; return t; }
+static KT kt_closed(Ast *d) { return kt(NULL, 0, d); }
+static KT kt_tail(KT t) { return kt(t.n > 1 ? t.g + 1 : NULL, t.n > 0 ? t.n - 1 : 0, t.d); }
+static int kt_head(KT t) { return t.n > 0 && t.g[0]; }           /* True:g */
+static int kt_is_var0(KT t) { return t.n == 1 && t.g[0] && t.d->tag == AST_I; }   /* (True:[], I): the innermost variable itself */
+static Ast *kapp_ast(AstPool *p, Ast *f, Ast *a) { return ast_app(p, noloc, f, a); }
+static Ast *kcomb(AstPool *p, AstTag tag) { Ast *a = ast_s(p, noloc); a->tag = tag; return a; }
+
+static Ast *kapp(AstPool *p, KT t1, KT t2);
+/* the rules of #: how the innermost variable is used on each side decides the combinator */
+static Ast *kapp(AstPool *p, KT t1, KT t2) {
+    if (t1.n == 0) {
+        if (t2.n == 0) return kapp_ast(p, t1.d, t2.d);                                         /* d1 d2 */
+        if (kt_is_var0(t2)) return t1.d;                                                        /* eta: \x. d1 x = d1 */
+        if (kt_head(t2)) return kapp(p, kt_closed(kapp_ast(p, kcomb(p, AST_B), t1.d)), kt_tail(t2));   /* B d1 . */
+        return kapp(p, t1, kt_tail(t2));                                                        /* x unused on the right */
     }
-    
+    if (kt_is_var0(t1)) {
+        if (t2.n == 0) return kapp_ast(p, kcomb(p, AST_T), t2.d);                              /* \x. x d2 = T d2 */
+        if (!kt_head(t2)) return kapp(p, kt_closed(kcomb(p, AST_T)), kt_tail(t2));
+    }
+    if (kt_head(t1)) {
+        if (t2.n == 0) return kapp(p, kt_closed(kapp_ast(p, kcomb(p, AST_R), t2.d)), kt_tail(t1));    /* R d2 . */
+        KT t1p = kt_tail(t1);
+        if (kt_head(t2)) return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_S)), t1p)), kt_tail(t2));   /* S */
+        return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_C)), t1p)), kt_tail(t2));                  /* C */
+    }
+    /* x unused on the left */
+    KT t1p = kt_tail(t1);
+    if (t2.n == 0) return kapp(p, t1p, t2);
+    if (kt_is_var0(t2)) return t1.d;                                                            /* eta */
+    if (kt_head(t2)) return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_B)), t1p)), kt_tail(t2));   /* B */
+    return kapp(p, t1p, kt_tail(t2));
+}
+/* the union of two bit lists */
+static unsigned char *g_union(const unsigned char *a, int na, const unsigned char *b, int nb, int *n) {
+    *n = na > nb ? na : nb;
+    unsigned char *g = *n ? malloc(*n) : NULL;
+    for (int i = 0; i < *n; i++) g[i] = (i < na && a[i]) || (i < nb && b[i]);
+    return g;
+}
+static Ast *expand_num(AstPool *pool, i64 n);
+static KT kconv(AstPool *p, Ast *e, bool *ok) {
+    switch (e->tag) {
+    case AST_VAR: {
+        int k = e->var.debruijn;
+        if (k < 0) { fprintf(stderr, "Error: free variable '%.*s' in term\n", e->var.name.len, e->var.name.str); *ok = false; return kt_closed(e); }
+        unsigned char *g = malloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
+        return kt(g, k + 1, ast_i(p, noloc));
+    }
+    case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R:
+        return kt_closed(e);
     case AST_ABS: {
-        /* λparam.body  -->  [param](ast_to_comb(body, but keep param free)) 
-         * Actually simpler: abstract the param from the body directly
-         */
-        Ast *inner = abstract_name(pool, ast->abs.body, ast->abs.param);
-        if (!inner) return NULL;
-        /* Now inner still might have lambdas, recurse */
-        return ast_to_comb(pool, inner);
+        KT b = kconv(p, e->abs.body, ok);
+        if (!*ok) return b;
+        if (b.n == 0) return kt_closed(kapp_ast(p, ast_k(p, noloc), b.d));                    /* \x. d = K d */
+        if (!b.g[0]) { KT t = kt_tail(b); return kt(t.g, t.n, kapp(p, kt_closed(ast_k(p, noloc)), t)); }
+        return kt_tail(b);
     }
-    
-    case AST_LET:
-        fprintf(stderr, "Error: LET should be desugared\n");
-        return NULL;
-    
+    case AST_APP: {
+        KT t1 = kconv(p, e->app.func, ok); if (!*ok) return t1;
+        KT t2 = kconv(p, e->app.arg, ok); if (!*ok) return t2;
+        int n; unsigned char *g = g_union(t1.g, t1.n, t2.g, t2.n, &n);
+        return kt(g, n, kapp(p, t1, t2));
+    }
     case AST_NUM: {
-        /* Church numeral, built by BINARY expansion so the term is
-         * O(log n) in size instead of the O(n) unary f^n x.
-         *
-         *   ZERO = λf.λx.x
-         *   ONE  = λf.λx.f x
-         *   DBL  = λm.λf.λx. m f (m f x)      (add m m)
-         *   SUCC = λm.λf.λx. f (m f x)
-         *
-         * n is read MSB-first: acc = ONE; for each lower bit:
-         *   acc = DBL acc;  if bit set: acc = SUCC acc.
-         * DBL and SUCC are closed lambdas applied to acc, so each step
-         * adds a constant-size combinator and one application node; the
-         * value is extensionally the same Church numeral as before.
-         */
-        i64 n = ast->num;
-        if (n < 0) {
-            fprintf(stderr, "Error: negative numbers not supported\n");
-            return NULL;
-        }
-        
-        Symbol f_sym = { "f", 1 };
-        Symbol x_sym = { "x", 1 };
-        Symbol m_sym = { "m", 1 };
-        
-        #define NUM_VAR(sym) ast_var(pool, noloc, (sym))
-        #define NUM_APP(a, b) ast_app(pool, noloc, (a), (b))
-        #define NUM_ABS(sym, body) ast_abs(pool, noloc, (sym), (body))
-        
-        Ast *acc;
-        if (n == 0) {
-            /* λf.λx.x */
-            acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_VAR(x_sym)));
-        } else {
-            /* λf.λx.f x */
-            acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_APP(NUM_VAR(f_sym), NUM_VAR(x_sym))));
-            int msb = 63 - __builtin_clzll((u64)n);
-            for (int i = msb - 1; i >= 0; i--) {
-                /* DBL acc: λm.λf.λx. m f (m f x) */
-                Ast *mf1 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
-                Ast *mf2 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
-                Ast *dbl = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym,
-                               NUM_APP(mf1, NUM_APP(mf2, NUM_VAR(x_sym))))));
-                acc = NUM_APP(dbl, acc);
-                if ((n >> i) & 1) {
-                    /* SUCC acc: λm.λf.λx. f (m f x) */
-                    Ast *mfx = NUM_APP(NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym)), NUM_VAR(x_sym));
-                    Ast *succ = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym,
-                                    NUM_APP(NUM_VAR(f_sym), mfx))));
-                    acc = NUM_APP(succ, acc);
-                }
+        Ast *acc = expand_num(p, e->num);
+        if (!acc) { *ok = false; return kt_closed(e); }
+        if (!resolve_rec(acc, NULL)) { *ok = false; return kt_closed(e); }
+        return kconv(p, acc, ok);
+    }
+    case AST_LET:
+        fprintf(stderr, "Error: LET should be desugared before bracket abstraction\n"); *ok = false; return kt_closed(e);
+    case AST_STR:
+        fprintf(stderr, "Error: string literals should be desugared before bracket abstraction\n"); *ok = false; return kt_closed(e);
+    }
+    *ok = false; return kt_closed(e);
+}
+/* a numeral as a Church numeral built by binary expansion: O(log n) in size (ZERO, ONE, DBL, SUCC as closed lambdas) */
+static Ast *expand_num(AstPool *pool, i64 n) {
+    if (n < 0) { fprintf(stderr, "Error: negative numbers not supported\n"); return NULL; }
+    Symbol f_sym = { "f", 1 };
+    Symbol x_sym = { "x", 1 };
+    Symbol m_sym = { "m", 1 };
+    #define NUM_VAR(sym) ast_var(pool, noloc, (sym))
+    #define NUM_APP(a, b) ast_app(pool, noloc, (a), (b))
+    #define NUM_ABS(sym, body) ast_abs(pool, noloc, (sym), (body))
+    Ast *acc;
+    if (n == 0) {
+        acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_VAR(x_sym)));
+    } else {
+        acc = NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_APP(NUM_VAR(f_sym), NUM_VAR(x_sym))));
+        int msb = 63 - __builtin_clzll((u64)n);
+        for (int i = msb - 1; i >= 0; i--) {
+            Ast *mf1 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
+            Ast *mf2 = NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym));
+            Ast *dbl = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_APP(mf1, NUM_APP(mf2, NUM_VAR(x_sym))))));
+            acc = NUM_APP(dbl, acc);
+            if ((n >> i) & 1) {
+                Ast *mfx = NUM_APP(NUM_APP(NUM_VAR(m_sym), NUM_VAR(f_sym)), NUM_VAR(x_sym));
+                Ast *succ = NUM_ABS(m_sym, NUM_ABS(f_sym, NUM_ABS(x_sym, NUM_APP(NUM_VAR(f_sym), mfx))));
+                acc = NUM_APP(succ, acc);
             }
         }
-        
-        #undef NUM_VAR
-        #undef NUM_APP
-        #undef NUM_ABS
-        
-        return ast_to_comb(pool, acc);
     }
-    
-    case AST_STR:
-        fprintf(stderr, "Error: strings should be desugared\n");
-        return NULL;
-    }
-    return NULL;
+    #undef NUM_VAR
+    #undef NUM_APP
+    #undef NUM_ABS
+    return acc;
 }
 
 /* Convert combinator-only AST to SKITerm */
+static SKITerm *ski_B(SKIPool *p) {   /* S (K S) K */
+    return ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_k(p), ski_s(p))), ski_k(p));
+}
+static SKITerm *ski_C(SKIPool *p) {   /* S (S (K B) S) (K K) with B = S (K S) K */
+    return ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_k(p), ski_B(p))), ski_s(p))), ski_app(p, ski_k(p), ski_k(p)));
+}
 static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
+    static SKIPool *cached_pool; static SKITerm *cB, *cC, *cT, *cR;   /* one S K tree per combinator per pool (the emission walks trees, sharing is free) */
+    if (cached_pool != pool) { cached_pool = pool; cB = cC = cT = cR = NULL; }
     switch (comb->tag) {
     case AST_S:
         return ski_s(pool);
@@ -310,6 +225,10 @@ static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
         return ski_k(pool);
     case AST_I:
         return ski_i(pool);
+    case AST_B: if (!cB) cB = ski_B(pool); return cB;
+    case AST_C: if (!cC) cC = ski_C(pool); return cC;
+    case AST_T: if (!cT) cT = ski_app(pool, ski_C(pool), ski_i(pool)); return cT;          /* C I */
+    case AST_R: if (!cR) cR = ski_app(pool, ski_C(pool), ski_C(pool)); return cR;          /* C C */
     case AST_APP: {
         SKITerm *f = comb_to_term(pool, comb->app.func);
         SKITerm *a = comb_to_term(pool, comb->app.arg);
@@ -336,7 +255,9 @@ static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
 
 /* Main entry point */
 SKITerm* bracket_compile(AstPool *ast_pool, SKIPool *ski_pool, Ast *ast) {
-    Ast *comb = ast_to_comb(ast_pool, ast);
-    if (!comb) return NULL;
-    return comb_to_term(ski_pool, comb);
+    bool ok = true;
+    KT t = kconv(ast_pool, ast, &ok);
+    if (!ok) return NULL;
+    if (t.n > 0) { fprintf(stderr, "Error: the program is not closed\n"); return NULL; }
+    return comb_to_term(ski_pool, t.d);
 }

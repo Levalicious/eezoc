@@ -25,6 +25,10 @@ typedef enum {
     AST_S,          /* S combinator (primitive) */
     AST_K,          /* K combinator (primitive) */
     AST_I,          /* I combinator (primitive) */
+    AST_B,          /* B f g x = f (g x)      (emitted as S (K S) K) */
+    AST_C,          /* C f g x = f x g        (emitted as S (S (K (S (K S) K)) S) (K K)) */
+    AST_T,          /* T x f = f x            (C I) */
+    AST_R,          /* R x f y = f y x        (C C) */
 } AstTag;
 
 typedef struct Ast Ast;
