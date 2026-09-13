@@ -531,7 +531,7 @@ int main(int argc, char **argv) {
     pool_init(&tp, 1000000);
     
     AstPool ap;
-    ast_pool_init(&ap, 1000000);
+    ast_pool_init(&ap, 8000000);
     
     int verbose = 0;
     EmitMode mode = EMIT_BCL;
