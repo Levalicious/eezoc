@@ -120,6 +120,24 @@ Ast *ast_i(AstPool *p, SrcLoc loc) {
     return a;
 }
 
+Ast *ast_word(AstPool *p, SrcLoc loc, u64 w) {
+    Ast *a = ast_alloc(p);
+    if (!a) return NULL;
+    a->tag = AST_WORD;
+    a->loc = loc;
+    a->word = w;
+    return a;
+}
+
+Ast *ast_prim(AstPool *p, SrcLoc loc, PrimOp op) {
+    Ast *a = ast_alloc(p);
+    if (!a) return NULL;
+    a->tag = AST_PRIM;
+    a->loc = loc;
+    a->op = op;
+    return a;
+}
+
 static void print_symbol(Symbol s) {
     printf("%.*s", s.len, s.str);
 }
@@ -179,5 +197,7 @@ void ast_print(Ast *a) {
     case AST_C: printf("C"); break;
     case AST_T: printf("T"); break;
     case AST_R: printf("R"); break;
+    case AST_WORD: printf("%lluw", (unsigned long long)a->word); break;
+    case AST_PRIM: printf("w%s", prim_name(a->op)); break;
     }
 }

@@ -174,7 +174,20 @@ static Ast *convert_application(ConvCtx *ctx, Term *term) {
 static Ast *convert_numeral(ConvCtx *ctx, Term *term) {
     Tag tag = getTag(term);
     long long value = getValue(term);
+    if (getVariety(term) == 1) return ast_word(ctx->pool, tag_to_loc(tag), (u64)value);   /* 5w */
     return ast_num(ctx->pool, tag_to_loc(tag), value);
+}
+
+/*
+ * Convert LZ OPERATION to our Ast: the word primitives are pseudo-operations of the parser
+ * (parse/term.h), in PrimOp order from WADD.
+ */
+static Ast *convert_operation(ConvCtx *ctx, Term *term) {
+    Tag tag = getTag(term);
+    OperationCode code = getOperationCode(term);
+    if (code >= WADD && code <= WDIVMOD) return ast_prim(ctx->pool, tag_to_loc(tag), (PrimOp)(code - WADD));
+    fprintf(stderr, "Error: operation '%s' is not supported\n", Operations[code]);
+    return NULL;
 }
 
 /*
@@ -193,8 +206,7 @@ static Ast *convert_term_ctx(ConvCtx *ctx, Term *term) {
     case NUMERAL:
         return convert_numeral(ctx, term);
     case OPERATION:
-        fprintf(stderr, "Error: operations not yet supported\n");
-        return NULL;
+        return convert_operation(ctx, term);
     default:
         fprintf(stderr, "Error: unknown term type %d\n", getTermType(term));
         return NULL;

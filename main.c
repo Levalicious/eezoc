@@ -367,6 +367,7 @@ typedef enum {
     EMIT_BCL,
     EMIT_JOT,
     EMIT_JOMPLEMENT,
+    EMIT_XBCL,
 } EmitMode;
 
 /* Convert EmitMode to OutputFormat for native backend */
@@ -375,6 +376,7 @@ static OutputFormat emit_mode_to_output_format(EmitMode mode) {
         case EMIT_BCL: return OUTPUT_BCL;
         case EMIT_JOT: return OUTPUT_JOT;
         case EMIT_JOMPLEMENT: return OUTPUT_JOMPLEMENT;
+        case EMIT_XBCL: return OUTPUT_XBCL;
     }
     return OUTPUT_BCL;
 }
@@ -437,6 +439,18 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             /* Emit ELF */
             u8 *elf;
             u32 elf_size;
+            /* The ELF evaluates the term as the chosen format would carry it: a pure format
+             * spells B C T R as S K trees (and cannot spell words), XBCL keeps the leaves. */
+            if (mode != EMIT_XBCL) {
+                SKITerm *pure = ski_expand_pure(tp, ski);
+                if (!pure) {
+                    fprintf(stderr, "Error: the program uses machine words; emit it with -f xbcl\n");
+                    free(source);
+                    return 1;
+                }
+                ski_unref(tp, ski);
+                ski = pure;
+            }
             native_emit_elf(&e, &elf, &elf_size, ski, heap_size);
             
             if (elf) {
@@ -457,10 +471,19 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             return 0;
         }
         
+        /* machine words have no pure S K spelling: they need the extended format or the ELF */
+        if (mode != EMIT_XBCL && ski_uses_words(ski)) {
+            fprintf(stderr, "Error: the program uses machine words; emit it with -f xbcl or -e\n");
+            free(source);
+            return 1;
+        }
+        
         /* Allocate buffer for emission */
         u64 size_bits;
         if (mode == EMIT_BCL) {
             size_bits = bcl_size(ski);
+        } else if (mode == EMIT_XBCL) {
+            size_bits = xbcl_size(ski);
         } else {
             size_bits = jot_size(ski);
         }
@@ -483,6 +506,15 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
                     bits = (i32)bcl_buffer_len(&bb);
                 }
                 if (verbose) fprintf(stderr, "BCL (%d bits): ", bits);
+                break;
+            }
+            case EMIT_XBCL: {
+                BclBuffer bb;
+                bcl_buffer_init(&bb, buf, buf_size * 8);
+                if (xbcl_emit(ski, &bb)) {
+                    bits = (i32)bcl_buffer_len(&bb);
+                }
+                if (verbose) fprintf(stderr, "XBCL (%d bits): ", bits);
                 break;
             }
             case EMIT_JOT:
@@ -524,7 +556,9 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nEezo compiler - compiles .eezo source to bytecode\n");
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
-    fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement\n");
+    fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement, xbcl\n");
+    fprintf(stderr, "                (xbcl carries machine words: literals 5w, wadd wsub wmul wand wor wxor wshl wshr\n");
+    fprintf(stderr, "                 weq wlt waddc wsubb wmull wdivmod; the pure formats refuse them)\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
@@ -595,6 +629,8 @@ int main(int argc, char **argv) {
                 mode = EMIT_JOT;
             } else if (strcmp(argv[i], "jomplement") == 0) {
                 mode = EMIT_JOMPLEMENT;
+            } else if (strcmp(argv[i], "xbcl") == 0) {
+                mode = EMIT_XBCL;
             } else {
                 fprintf(stderr, "Unknown format: %s\n", argv[i]);
                 usage(argv[0]);
