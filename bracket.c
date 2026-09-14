@@ -209,15 +209,7 @@ static Ast *expand_num(AstPool *pool, i64 n) {
 }
 
 /* Convert combinator-only AST to SKITerm */
-static SKITerm *ski_B(SKIPool *p) {   /* S (K S) K */
-    return ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_k(p), ski_s(p))), ski_k(p));
-}
-static SKITerm *ski_C(SKIPool *p) {   /* S (S (K B) S) (K K) with B = S (K S) K */
-    return ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_app(p, ski_s(p), ski_app(p, ski_k(p), ski_B(p))), ski_s(p))), ski_app(p, ski_k(p), ski_k(p)));
-}
 static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
-    static SKIPool *cached_pool; static SKITerm *cB, *cC, *cT, *cR;   /* one S K tree per combinator per pool (the emission walks trees, sharing is free) */
-    if (cached_pool != pool) { cached_pool = pool; cB = cC = cT = cR = NULL; }
     switch (comb->tag) {
     case AST_S:
         return ski_s(pool);
@@ -225,10 +217,10 @@ static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
         return ski_k(pool);
     case AST_I:
         return ski_i(pool);
-    case AST_B: if (!cB) cB = ski_B(pool); return cB;
-    case AST_C: if (!cC) cC = ski_C(pool); return cC;
-    case AST_T: if (!cT) cT = ski_app(pool, ski_C(pool), ski_i(pool)); return cT;          /* C I */
-    case AST_R: if (!cR) cR = ski_app(pool, ski_C(pool), ski_C(pool)); return cR;          /* C C */
+    case AST_B: return ski_b(pool);     /* native leaves; the pure formats spell them as S K trees at emission */
+    case AST_C: return ski_c(pool);
+    case AST_T: return ski_t(pool);
+    case AST_R: return ski_r(pool);
     case AST_APP: {
         SKITerm *f = comb_to_term(pool, comb->app.func);
         SKITerm *a = comb_to_term(pool, comb->app.arg);
