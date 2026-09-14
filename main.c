@@ -546,7 +546,7 @@ int main(int argc, char **argv) {
     int emit_elf = 0;
     int nf_mode = 1;
     int io_mode = 0;
-    u32 heap_size = 16 * 1024 * 1024;
+    u32 heap_size = NATIVE_DEFAULT_HEAP_SIZE;
     
     /* Parse options */
     for (int i = 1; i < argc; i++) {
