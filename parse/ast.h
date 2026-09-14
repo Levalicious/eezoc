@@ -104,6 +104,11 @@ static inline Node* Number(Tag tag, long long n) {
     return newLeaf(tag, NUMBER, 0, n);
 }
 
+/* A machine-word literal (5w): a NUMBER of variety 1 carrying the u64 bit pattern */
+static inline Node* Word(Tag tag, unsigned long long n) {
+    return newLeaf(tag, NUMBER, 1, (long long)n);
+}
+
 static inline Node* Definition(Tag tag, DefinitionVariety variety,
         Node* left, Node* right) {
     return newBranch(tag, DEFINITION, (char)variety, left, right);

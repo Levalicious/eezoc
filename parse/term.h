@@ -3,13 +3,18 @@ typedef enum {VARIABLE, ABSTRACTION, APPLICATION, NUMERAL, OPERATION} TermType;
 // names in Operations must line up with codes in OperationCode
 static const char* const Operations[] = {"", "+", "--", "*", "//", "%",
     "=", "=/=", "<", ">", "<=", ">=", "abort",
-    "up", "(exit)", "(put)", "(get)"};
+    "up", "(exit)", "(put)", "(get)",
+    /* the word primitives (2026-09-13), in the order of libeezo's PrimOp: reserved names */
+    "wadd", "wsub", "wmul", "wand", "wor", "wxor", "wshl", "wshr",
+    "weq", "wlt", "waddc", "wsubb", "wmull", "wdivmod"};
 typedef enum {NONE, PLUS, MONUS, TIMES, DIVIDE, MODULO, EQUAL, NOTEQUAL,
       LESSTHAN, GREATERTHAN, LESSTHANOREQUAL, GREATERTHANOREQUAL,
-      ABORT, INCREMENT, EXIT, PUT, GET} OperationCode;
+      ABORT, INCREMENT, EXIT, PUT, GET,
+      WADD, WSUB, WMUL, WAND, WOR, WXOR, WSHL, WSHR,
+      WEQ, WLT, WADDC, WSUBB, WMULL, WDIVMOD} OperationCode;
 
 static inline bool isPseudoOperation(OperationCode c) {
-    return c == ABORT || c == EXIT || c == PUT || c == GET;
+    return c == ABORT || c == EXIT || c == PUT || c == GET || (c >= WADD && c <= WDIVMOD);
 }
 
 typedef Node Term;

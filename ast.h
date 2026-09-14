@@ -14,6 +14,7 @@
 #define AST_H
 
 #include <libeezo/types.h>
+#include <libeezo/term.h>   /* PrimOp */
 
 typedef enum {
     AST_VAR,        /* Variable reference */
@@ -29,6 +30,8 @@ typedef enum {
     AST_C,          /* C f g x = f x g        (emitted as S (S (K (S (K S) K)) S) (K K)) */
     AST_T,          /* T x f = f x            (C I) */
     AST_R,          /* R x f y = f y x        (C C) */
+    AST_WORD,       /* a machine word literal (5w) */
+    AST_PRIM,       /* a word primitive (wadd ... wdivmod) */
 } AstTag;
 
 typedef struct Ast Ast;
@@ -78,6 +81,12 @@ struct Ast {
         /* AST_NUM: numeric literal */
         i64 num;
         
+        /* AST_WORD: the word */
+        u64 word;
+        
+        /* AST_PRIM: the primitive */
+        PrimOp op;
+        
         /* AST_STR: string literal */
         struct {
             const char *data;
@@ -107,6 +116,8 @@ Ast *ast_str(AstPool *p, SrcLoc loc, const char *data, u32 len);
 Ast *ast_s(AstPool *p, SrcLoc loc);
 Ast *ast_k(AstPool *p, SrcLoc loc);
 Ast *ast_i(AstPool *p, SrcLoc loc);
+Ast *ast_word(AstPool *p, SrcLoc loc, u64 w);
+Ast *ast_prim(AstPool *p, SrcLoc loc, PrimOp op);
 
 /* Debug */
 void ast_print(Ast *a);

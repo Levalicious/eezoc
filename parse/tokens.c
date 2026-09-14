@@ -16,8 +16,25 @@ static bool isNumberLexeme(Lexeme lexeme) {
     return lexeme.length > 0;
 }
 
+/* digits then 'w': a machine-word literal, a u64 with wrap-around */
+static bool isWordLexeme(Lexeme lexeme) {
+    if (lexeme.length < 2 || lexeme.start[lexeme.length - 1] != 'w')
+        return false;
+    for (unsigned int i = 0; i + 1 < lexeme.length; ++i)
+        if (!isdigit(lexeme.start[i]))
+            return false;
+    return true;
+}
+
 static Node* parseNumber(Lexeme lexeme) {
     Tag tag = newTag(lexeme, NOFIX);
+    if (isWordLexeme(lexeme)) {
+        errno = 0;
+        unsigned long long value = strtoull(lexeme.start, NULL, 10);
+        if (value == ULLONG_MAX && errno == ERANGE)
+            syntaxError("word literal does not fit 64 bits", tag);
+        return Word(tag, value);
+    }
     syntaxErrorIf(!isNumberLexeme(lexeme), "invalid token", tag);
     errno = 0;
     long long value = strtoll(lexeme.start, NULL, 10);

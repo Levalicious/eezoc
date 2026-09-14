@@ -8,6 +8,9 @@
 #
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EEZO="${SCRIPT_DIR}/../eezo/eezo"
+EEZOC="${SCRIPT_DIR}/../eezoc/eezoc"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 status=0
 check() { if [ "$2" = "$3" ]; then echo "PASS: $1"; else echo "FAIL: $1"; echo "  Expected: $2"; echo "  Got:      $3"; status=1; fi; }
 
@@ -60,4 +63,33 @@ for be in $backends; do
   nf="$(pair "$(word 3)" "$(ap "$K" "$I")")"
   check "$be: a normal form reads back as itself" "$nf" "$(run "" "$nf")"
 done
+
+# ---- the surface language: literals 5w and the primitives wadd ... wdivmod, through eezoc ----
+compile() { printf '%s' "$1" > "$TMP/p.eezo"; "$EEZOC" -f xbcl < "$TMP/p.eezo"; }
+LIMBS='#import pair
+add2(a0)(a1)(b0)(b1) := waddc(a0)(b0)(s -> c -> pair(s)(wadd(wadd(a1)(b1))(c)));
+add2(18446744073709551615w)(0w)(1w)(0w)'
+LIMBS_EXPECT='#import pair
+pair(0w)(1w)'
+for be in $backends; do
+  flag=${be/stg/}
+  run_src() { compile "$1" | timeout 60 "$EEZO" $flag -f xbcl; }
+  check "$be surface: wadd(2w)(3w)"          "$(word 5)"                          "$(run_src 'wadd(2w)(3w)')"
+  check "$be surface: wadd wraps"            "$(word 0)"                          "$(run_src 'wadd(18446744073709551615w)(1w)')"
+  check "$be surface: wmull 2^32 2^32"       "$(pair "$(word 0)" "$(word 1)")"    "$(run_src 'wmull(4294967296w)(4294967296w)')"
+  check "$be surface: wdivmod 7 0"           "$(pair "$(word 0)" "$(word 7)")"    "$(run_src 'wdivmod(7w)(0w)')"
+  check "$be surface: weq 7 7"               "$K"                                 "$(run_src 'weq(7w)(7w)')"
+  check "$be surface: wlt 8 7"               "$(ap "$K" "$I")"                    "$(run_src 'wlt(8w)(7w)')"
+  check "$be surface: two-limb add carries"  "$(run_src "$LIMBS_EXPECT")"         "$(run_src "$LIMBS")"
+done
+elf_run() { printf '%s' "$1" > "$TMP/p.eezo"; "$EEZOC" -e -f xbcl < "$TMP/p.eezo" > "$TMP/p.elf" && chmod +x "$TMP/p.elf" && timeout 60 "$TMP/p.elf"; }
+check "elf surface: wadd(2w)(3w)"            "$(word 5)"                          "$(elf_run 'wadd(2w)(3w)')"
+check "elf surface: wmull 2^32 2^32"         "$(pair "$(word 0)" "$(word 1)")"    "$(elf_run 'wmull(4294967296w)(4294967296w)')"
+check "elf surface: wdivmod 7 0"             "$(pair "$(word 0)" "$(word 7)")"    "$(elf_run 'wdivmod(7w)(0w)')"
+check "elf surface: two-limb add carries"    "$(elf_run "$LIMBS_EXPECT")"         "$(elf_run "$LIMBS")"
+# the pure formats cannot carry words
+printf 'wadd(2w)(3w)' > "$TMP/w.eezo"
+"$EEZOC" -f bcl < "$TMP/w.eezo" >/dev/null 2>/dev/null; check "bcl refuses words (rc 1)" "1" "$?"
+"$EEZOC" -f jot < "$TMP/w.eezo" >/dev/null 2>/dev/null; check "jot refuses words (rc 1)" "1" "$?"
+"$EEZOC" -e -f bcl < "$TMP/w.eezo" >/dev/null 2>/dev/null; check "elf -f bcl refuses words (rc 1)" "1" "$?"
 exit $status

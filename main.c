@@ -557,6 +557,8 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
     fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement, xbcl\n");
+    fprintf(stderr, "                (xbcl carries machine words: literals 5w, wadd wsub wmul wand wor wxor wshl wshr\n");
+    fprintf(stderr, "                 weq wlt waddc wsubb wmull wdivmod; the pure formats refuse them)\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
