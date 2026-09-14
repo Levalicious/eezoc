@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 #include <stdlib.h>     // llabs
 #include <stdio.h>
 #include "util.h"
@@ -10,7 +11,8 @@ void* error(const char* message) {
 
 void* smalloc(size_t size) {
     void* p = malloc(size);
-    return p == NULL && size > 0 ? error("\nError: out of memory\n") : p;
+    if (p == NULL && size > 0) resource_die("out of memory (%zu bytes)", size);
+    return p;
 }
 
 static char getDigitCharacter(long long n) {

@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 #include "bracket.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,7 +137,7 @@ static Ast *kapp(AstPool *p, KT t1, KT t2) {
 /* the union of two bit lists */
 static unsigned char *g_union(const unsigned char *a, int na, const unsigned char *b, int nb, int *n) {
     *n = na > nb ? na : nb;
-    unsigned char *g = *n ? malloc(*n) : NULL;
+    unsigned char *g = *n ? rmalloc(*n) : NULL;
     for (int i = 0; i < *n; i++) g[i] = (i < na && a[i]) || (i < nb && b[i]);
     return g;
 }
@@ -146,7 +147,7 @@ static KT kconv(AstPool *p, Ast *e, bool *ok) {
     case AST_VAR: {
         int k = e->var.debruijn;
         if (k < 0) { fprintf(stderr, "Error: free variable '%.*s' in term\n", e->var.name.len, e->var.name.str); *ok = false; return kt_closed(e); }
-        unsigned char *g = malloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
+        unsigned char *g = rmalloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
         return kt(g, k + 1, ast_i(p, noloc));
     }
     case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R: case AST_WORD: case AST_PRIM:

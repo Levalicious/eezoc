@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 /*
  * ast.c - AST implementation
  */
@@ -7,7 +8,7 @@
 #include <string.h>
 
 void ast_pool_init(AstPool *p, u32 capacity) {
-    p->pool = calloc(capacity, sizeof(Ast));
+    p->pool = rcalloc(capacity, sizeof(Ast));
     p->capacity = capacity;
     p->next = 0;
 }

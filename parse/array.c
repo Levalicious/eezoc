@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 #include <assert.h>
 #include <stdlib.h>
 #include "util.h"
@@ -30,7 +31,7 @@ void append(Array* array, void* value) {
         size_t newSize = array->capacity * sizeof(void*);
         array->elements = realloc(array->elements, newSize);
         if (array->elements == NULL)
-            error("\nError: out of memory\n");
+            resource_die("out of memory");
     }
     array->elements[array->length++] = value;
 }
