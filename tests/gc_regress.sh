@@ -8,7 +8,13 @@
 # unimplemented GC path. Expected answer: and(isZero 0)(isZero 0) = 00.
 #
 # The -H 65536 runs start from a 64 KiB semispace, so the native
-# collector's grow-and-recollect path runs many times.
+# collector's grow-and-recollect path runs many times. Since the
+# Kiselyov/let-sharing translation (2026-09-13) the program term itself is
+# ~108 KB of App cells, larger than that initial space, so these two runs
+# also cover: the JIT sizing its heaps to the term before building it
+# (it used to write first and bounds-check after), and growth past 16x
+# the initial size (the ceiling used to be tied to -H; the live set here
+# exceeds 1 MiB).
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
