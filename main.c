@@ -560,7 +560,8 @@ static void usage(const char *prog) {
     fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement, xbcl\n");
     fprintf(stderr, "                (xbcl carries machine words and limb lists: a literal 5w, the word primitives wadd wsub\n");
     fprintf(stderr, "                 wmul wand wor wxor wshl wshr weq wlt waddc wsubb wmull wdivmod, and the limb primitives\n");
-    fprintf(stderr, "                 badd bsub bmul bdivmod blt beq, which take limb lists - a machine word is one; the pure\n");
+    fprintf(stderr, "                 badd bsub bmul bdivmod blt beq bpow bminv, which take limb lists - a machine word\n");
+    fprintf(stderr, "                 is one, and a literal is digits then b; the pure\n");
     fprintf(stderr, "                 formats refuse both)\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");

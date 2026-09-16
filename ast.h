@@ -15,6 +15,7 @@
 
 #include <libeezo/types.h>
 #include <libeezo/term.h>   /* PrimOp */
+#include <libeezo/bn.h>     /* Bn: the limb list of AST_BIG */
 
 typedef enum {
     AST_VAR,        /* Variable reference */
@@ -31,7 +32,8 @@ typedef enum {
     AST_T,          /* T x f = f x            (C I) */
     AST_R,          /* R x f y = f y x        (C C) */
     AST_WORD,       /* a machine word literal (5w) */
-    AST_PRIM,       /* a word primitive (wadd ... wdivmod) */
+    AST_BIG,        /* a limb list literal (digits then b): the C list of limbs (bn.h) */
+    AST_PRIM,       /* a word or limb primitive (wadd ... wdivmod, badd ... bpos) */
 } AstTag;
 
 typedef struct Ast Ast;
@@ -83,6 +85,9 @@ struct Ast {
         
         /* AST_WORD: the word */
         u64 word;
+
+        /* AST_BIG: the limb list */
+        Bn *big;
         
         /* AST_PRIM: the primitive */
         PrimOp op;
@@ -117,6 +122,7 @@ Ast *ast_s(AstPool *p, SrcLoc loc);
 Ast *ast_k(AstPool *p, SrcLoc loc);
 Ast *ast_i(AstPool *p, SrcLoc loc);
 Ast *ast_word(AstPool *p, SrcLoc loc, u64 w);
+Ast *ast_big(AstPool *p, SrcLoc loc, Bn *b);   /* takes ownership */
 Ast *ast_prim(AstPool *p, SrcLoc loc, PrimOp op);
 
 /* Debug */

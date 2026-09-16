@@ -9,16 +9,17 @@ static const char* const Operations[] = {"", "+", "--", "*", "//", "%",
     "weq", "wlt", "waddc", "wsubb", "wmull", "wdivmod",
     /* the limb primitives (2026-09-16), likewise in PrimOp order: they take limb lists (a machine
        word is one), and the C list of limbs evaluates them directly */
-    "badd", "bsub", "bmul", "bdivmod", "blt", "beq"};
+    "badd", "bsub", "bmul", "bdivmod", "blt", "beq",
+    "bpow", "bminv"};
 typedef enum {NONE, PLUS, MONUS, TIMES, DIVIDE, MODULO, EQUAL, NOTEQUAL,
       LESSTHAN, GREATERTHAN, LESSTHANOREQUAL, GREATERTHANOREQUAL,
       ABORT, INCREMENT, EXIT, PUT, GET,
       WADD, WSUB, WMUL, WAND, WOR, WXOR, WSHL, WSHR,
       WEQ, WLT, WADDC, WSUBB, WMULL, WDIVMOD,
-      BADD, BSUB, BMUL, BDIVMOD, BLT, BEQ} OperationCode;
+      BADD, BSUB, BMUL, BDIVMOD, BLT, BEQ, BPOW, BMINV} OperationCode;
 
 static inline bool isPseudoOperation(OperationCode c) {
-    return c == ABORT || c == EXIT || c == PUT || c == GET || (c >= WADD && c <= BEQ);
+    return c == ABORT || c == EXIT || c == PUT || c == GET || (c >= WADD && c <= BMINV);
 }
 
 typedef Node Term;

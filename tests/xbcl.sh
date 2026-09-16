@@ -89,12 +89,14 @@ check "elf surface: wdivmod 7 0"             "$(pair "$(word 0)" "$(word 7)")"  
 check "elf surface: two-limb add carries"    "$(elf_run "$LIMBS_EXPECT")"         "$(elf_run "$LIMBS")"
 # ---- the limb list (2026-09-16): a natural as the C list of limbs, running itself ----
 # The limb primitives are arity 2 on limb lists, and a machine word is a one-limb list. A limb list
-# is an extended leaf of its own: leaf code 26 (past the 20 primitives), then a 32-bit limb count,
-# then the limbs least significant first. They run on the simple interpreter, whose cells carry the
-# C list (bn.h) directly: every operation is one pass of C over the limbs, not a fold unfolding.
+# is an extended leaf of its own: leaf code 22 past the 14 word primitives (so 6 + 22 = 28), then a
+# 32-bit limb count, then the limbs least significant first. They run on the simple interpreter,
+# whose cells carry the C list (bn.h) directly: every operation is one pass of C over the limbs,
+# not a fold unfolding.
 BADD=$(prim 14); BSUB=$(prim 15); BMUL=$(prim 16); BDIVMOD=$(prim 17); BLT=$(prim 18); BEQ=$(prim 19)
+BPOW=$(prim 20); BMINV=$(prim 21); BIGLEAF=$(leaf 28)
 bits() { local n=$1 v=$2 o="" i; for ((i=n-1;i>=0;i--)); do o+=$(( (v >> i) & 1 )); done; echo -n "$o"; }
-big() { local o; o=$(leaf 26)$(bits 32 $#); for v in "$@"; do o+=$(bits 64 "$v"); done; echo -n "$o"; }
+big() { local o; o=$BIGLEAF$(bits 32 $#); for v in "$@"; do o+=$(bits 64 "$v"); done; echo -n "$o"; }
 N64=$(big 0 1); M64=$(big -1); N128=$(big 0 0 1); M128=$(big -1 -1)
 run_s() { echo "$2" | timeout 60 "$EEZO" -s -f xbcl $1; }
 check "-s: badd 2 3"                    "$(big 5)"                          "$(run_s "" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
@@ -117,6 +119,14 @@ check "-s surface: bsub(2^64)(1w)"      "$M64"                              "$(s
 check "-s surface: bmul(2^32)(2^32)"    "$N64"                              "$(surface 'bmul(4294967296w)(4294967296w)')"
 check "-s surface: bsub(2^128)(1w)"     "$M128"                             "$(surface 'bsub(bmul(bmul(4294967296w)(4294967296w))(bmul(4294967296w)(4294967296w)))(1w)')"
 check "-s surface: blt(2^64-1)(2^64)"   "$TRUE"                             "$(surface 'blt(18446744073709551615w)(badd(18446744073709551615w)(1w))')"
+# a limb-list literal (digits then b) and the two primitives the recursion equations need beyond
+# addition and multiplication: exponentiation, and the modular inverse x ^ (y - 2) mod y
+check "-s surface: the literal 2^64+1 minus 1" "$N64"                        "$(surface 'bsub(18446744073709551617b)(1w)')"
+check "-s surface: bpow(2w)(64w)"       "$N64"                              "$(surface 'bpow(2w)(64w)')"
+check "-s surface: bpow(2w)(256w)"      "$(big 0 0 0 0 1)"                  "$(surface 'bpow(2w)(256w)')"
+check "-s surface: bpow(3w)(0w)"        "$(big 1)"                          "$(surface 'bpow(3w)(0w)')"
+check "-s surface: bminv(3w)(7w) = 5"   "$(big 5)"                          "$(surface 'bminv(3w)(7w)')"
+check "-s surface: 3 * 3^-1 = 1 mod 7"  "$(pair "$(big 2)" "$(big 1)")"     "$(surface 'bdivmod(bmul(bminv(3w)(7w))(3w))(7w)')"
 # the limb list is the C list's answer, not a model's: the word layer's modelled two-limb add of
 # (2^64-1, 0) + (1, 0) is the pair (low 0, high 1) - and the C list, dividing its own sum by 2^64,
 # gives that high limb as the quotient and the low limb as the remainder
@@ -137,6 +147,8 @@ printf 'badd(2w)(3w)' > "$TMP/l.eezo"
 "$EEZOC" -f bcl < "$TMP/l.eezo" >/dev/null 2>/dev/null; check "bcl refuses a limb list (rc 1)" "1" "$?"
 "$EEZOC" -f jot < "$TMP/l.eezo" >/dev/null 2>/dev/null; check "jot refuses a limb list (rc 1)" "1" "$?"
 "$EEZOC" -e -f bcl < "$TMP/l.eezo" >/dev/null 2>/dev/null; check "elf -f bcl refuses a limb list (rc 1)" "1" "$?"
+printf '18446744073709551617b' > "$TMP/lb.eezo"
+"$EEZOC" -f bcl < "$TMP/lb.eezo" >/dev/null 2>/dev/null; check "bcl refuses a limb-list literal (rc 1)" "1" "$?"
 
 # the pure formats cannot carry words
 printf 'wadd(2w)(3w)' > "$TMP/w.eezo"
