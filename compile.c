@@ -180,13 +180,13 @@ static Ast *convert_numeral(ConvCtx *ctx, Term *term) {
 }
 
 /*
- * Convert LZ OPERATION to our Ast: the word primitives are pseudo-operations of the parser
+ * Convert LZ OPERATION to our Ast: the word and limb primitives are pseudo-operations of the parser
  * (parse/term.h), in PrimOp order from WADD.
  */
 static Ast *convert_operation(ConvCtx *ctx, Term *term) {
     Tag tag = getTag(term);
     OperationCode code = getOperationCode(term);
-    if (code >= WADD && code <= WDIVMOD) return ast_prim(ctx->pool, tag_to_loc(tag), (PrimOp)(code - WADD));
+    if (code >= WADD && code <= BEQ) return ast_prim(ctx->pool, tag_to_loc(tag), (PrimOp)(code - WADD));
     fprintf(stderr, "Error: operation '%s' is not supported\n", Operations[code]);
     return NULL;
 }

@@ -445,7 +445,7 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             if (mode != EMIT_XBCL) {
                 SKITerm *pure = ski_expand_pure(tp, ski);
                 if (!pure) {
-                    fprintf(stderr, "Error: the program uses machine words; emit it with -f xbcl\n");
+                    fprintf(stderr, "Error: the program uses machine words or a limb list; emit it with -f xbcl\n");
                     free(source);
                     return 1;
                 }
@@ -472,9 +472,9 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             return 0;
         }
         
-        /* machine words have no pure S K spelling: they need the extended format or the ELF */
-        if (mode != EMIT_XBCL && ski_uses_words(ski)) {
-            fprintf(stderr, "Error: the program uses machine words; emit it with -f xbcl or -e\n");
+        /* machine words and limb lists have no pure S K spelling: they need the extended format or the ELF */
+        if (mode != EMIT_XBCL && (ski_uses_words(ski) || ski_uses_bigs(ski))) {
+            fprintf(stderr, "Error: the program uses machine words or a limb list; emit it with -f xbcl or -e\n");
             free(source);
             return 1;
         }
@@ -558,8 +558,10 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
     fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement, xbcl\n");
-    fprintf(stderr, "                (xbcl carries machine words: literals 5w, wadd wsub wmul wand wor wxor wshl wshr\n");
-    fprintf(stderr, "                 weq wlt waddc wsubb wmull wdivmod; the pure formats refuse them)\n");
+    fprintf(stderr, "                (xbcl carries machine words and limb lists: a literal 5w, the word primitives wadd wsub\n");
+    fprintf(stderr, "                 wmul wand wor wxor wshl wshr weq wlt waddc wsubb wmull wdivmod, and the limb primitives\n");
+    fprintf(stderr, "                 badd bsub bmul bdivmod blt beq, which take limb lists - a machine word is one; the pure\n");
+    fprintf(stderr, "                 formats refuse both)\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
