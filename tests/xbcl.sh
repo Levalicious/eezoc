@@ -98,48 +98,49 @@ BPOW=$(prim 20); BMINV=$(prim 21); BIGLEAF=$(leaf 28)
 bits() { local n=$1 v=$2 o="" i; for ((i=n-1;i>=0;i--)); do o+=$(( (v >> i) & 1 )); done; echo -n "$o"; }
 big() { local o; o=$BIGLEAF$(bits 32 $#); for v in "$@"; do o+=$(bits 64 "$v"); done; echo -n "$o"; }
 N64=$(big 0 1); M64=$(big -1); N128=$(big 0 0 1); M128=$(big -1 -1)
-run_s() { echo "$2" | timeout 60 "$EEZO" -s -f xbcl $1; }
-check "-s: badd 2 3"                    "$(big 5)"                          "$(run_s "" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
-check "-s: badd 2^64-1 1 (the list grows)" "$N64"                           "$(run_s "" "$(ap3 "$BADD" "$(word -1)" "$(word 1)")")"
-check "-s: bsub 2^64 1"                 "$M64"                              "$(run_s "" "$(ap3 "$BSUB" "$N64" "$(word 1)")")"
-check "-s: bsub 3 5 = 0 (monus)"        "$(big)"                            "$(run_s "" "$(ap3 "$BSUB" "$(word 3)" "$(word 5)")")"
-check "-s: bmul 2^32 2^32"              "$N64"                              "$(run_s "" "$(ap3 "$BMUL" "$(word $((1 << 32)))" "$(word $((1 << 32)))")")"
-check "-s: bsub 2^128 1 (the borrow runs)" "$M128"                          "$(run_s "" "$(ap3 "$BSUB" "$N128" "$(word 1)")")"
-check "-s: bdivmod 2^128-1 2^64"        "$(pair "$M64" "$M64")"             "$(run_s "" "$(ap3 "$BDIVMOD" "$M128" "$N64")")"
-check "-s: bdivmod 7 0 = (0, 7)"        "$(pair "$(big)" "$(big 7)")"       "$(run_s "" "$(ap3 "$BDIVMOD" "$(word 7)" "$(word 0)")")"
-check "-s: blt 2^64 2^64-1"             "$FALSE"                            "$(run_s "" "$(ap3 "$BLT" "$N64" "$M64")")"
-check "-s: blt 2^64-1 2^64"             "$TRUE"                             "$(run_s "" "$(ap3 "$BLT" "$M64" "$N64")")"
-check "-s: beq 2^64 2^64"               "$TRUE"                             "$(run_s "" "$(ap3 "$BEQ" "$N64" "$N64")")"
-check "-s: beq (badd 2 3) 5w"           "$TRUE"                             "$(run_s "" "$(ap3 "$BEQ" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")" "$(word 5)")")"
-check "-s: whnf of a limb list"         "$(big 5)"                          "$(run_s "-N whnf" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
-check "-s: a limb list reads back as itself" "$M128"                       "$(run_s "" "$M128")"
-surface() { compile "$1" | timeout 60 "$EEZO" -s -f xbcl; }
-check "-s surface: badd(2w)(3w)"        "$(big 5)"                          "$(surface 'badd(2w)(3w)')"
-check "-s surface: bsub(2^64)(1w)"      "$M64"                              "$(surface 'bsub(badd(18446744073709551615w)(1w))(1w)')"
-check "-s surface: bmul(2^32)(2^32)"    "$N64"                              "$(surface 'bmul(4294967296w)(4294967296w)')"
-check "-s surface: bsub(2^128)(1w)"     "$M128"                             "$(surface 'bsub(bmul(bmul(4294967296w)(4294967296w))(bmul(4294967296w)(4294967296w)))(1w)')"
-check "-s surface: blt(2^64-1)(2^64)"   "$TRUE"                             "$(surface 'blt(18446744073709551615w)(badd(18446744073709551615w)(1w))')"
+# The limb list is the C list of limbs (bn.h) itself on the simple interpreter and on the STG machine, which
+# keeps the same list in its heap and hands its limbs to the same functions; the native JIT takes them next.
+for be in -s stg; do
+  flag=${be/stg/}
+  run_s() { echo "$2" | timeout 60 "$EEZO" $flag -f xbcl $1; }
+check "$be: badd 2 3"                    "$(big 5)"                          "$(run_s "" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
+check "$be: badd 2^64-1 1 (the list grows)" "$N64"                           "$(run_s "" "$(ap3 "$BADD" "$(word -1)" "$(word 1)")")"
+check "$be: bsub 2^64 1"                 "$M64"                              "$(run_s "" "$(ap3 "$BSUB" "$N64" "$(word 1)")")"
+check "$be: bsub 3 5 = 0 (monus)"        "$(big)"                            "$(run_s "" "$(ap3 "$BSUB" "$(word 3)" "$(word 5)")")"
+check "$be: bmul 2^32 2^32"              "$N64"                              "$(run_s "" "$(ap3 "$BMUL" "$(word $((1 << 32)))" "$(word $((1 << 32)))")")"
+check "$be: bsub 2^128 1 (the borrow runs)" "$M128"                          "$(run_s "" "$(ap3 "$BSUB" "$N128" "$(word 1)")")"
+check "$be: bdivmod 2^128-1 2^64"        "$(pair "$M64" "$M64")"             "$(run_s "" "$(ap3 "$BDIVMOD" "$M128" "$N64")")"
+check "$be: bdivmod 7 0 = (0, 7)"        "$(pair "$(big)" "$(big 7)")"       "$(run_s "" "$(ap3 "$BDIVMOD" "$(word 7)" "$(word 0)")")"
+check "$be: blt 2^64 2^64-1"             "$FALSE"                            "$(run_s "" "$(ap3 "$BLT" "$N64" "$M64")")"
+check "$be: blt 2^64-1 2^64"             "$TRUE"                             "$(run_s "" "$(ap3 "$BLT" "$M64" "$N64")")"
+check "$be: beq 2^64 2^64"               "$TRUE"                             "$(run_s "" "$(ap3 "$BEQ" "$N64" "$N64")")"
+check "$be: beq (badd 2 3) 5w"           "$TRUE"                             "$(run_s "" "$(ap3 "$BEQ" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")" "$(word 5)")")"
+check "$be: whnf of a limb list"         "$(big 5)"                          "$(run_s "-N whnf" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
+check "$be: a limb list reads back as itself" "$M128"                       "$(run_s "" "$M128")"
+surface() { compile "$1" | timeout 60 "$EEZO" $flag -f xbcl; }
+check "$be surface: badd(2w)(3w)"        "$(big 5)"                          "$(surface 'badd(2w)(3w)')"
+check "$be surface: bsub(2^64)(1w)"      "$M64"                              "$(surface 'bsub(badd(18446744073709551615w)(1w))(1w)')"
+check "$be surface: bmul(2^32)(2^32)"    "$N64"                              "$(surface 'bmul(4294967296w)(4294967296w)')"
+check "$be surface: bsub(2^128)(1w)"     "$M128"                             "$(surface 'bsub(bmul(bmul(4294967296w)(4294967296w))(bmul(4294967296w)(4294967296w)))(1w)')"
+check "$be surface: blt(2^64-1)(2^64)"   "$TRUE"                             "$(surface 'blt(18446744073709551615w)(badd(18446744073709551615w)(1w))')"
 # a limb-list literal (digits then b) and the two primitives the recursion equations need beyond
 # addition and multiplication: exponentiation, and the modular inverse x ^ (y - 2) mod y
-check "-s surface: the literal 2^64+1 minus 1" "$N64"                        "$(surface 'bsub(18446744073709551617b)(1w)')"
-check "-s surface: bpow(2w)(64w)"       "$N64"                              "$(surface 'bpow(2w)(64w)')"
-check "-s surface: bpow(2w)(256w)"      "$(big 0 0 0 0 1)"                  "$(surface 'bpow(2w)(256w)')"
-check "-s surface: bpow(3w)(0w)"        "$(big 1)"                          "$(surface 'bpow(3w)(0w)')"
-check "-s surface: bminv(3w)(7w) = 5"   "$(big 5)"                          "$(surface 'bminv(3w)(7w)')"
-check "-s surface: 3 * 3^-1 = 1 mod 7"  "$(pair "$(big 2)" "$(big 1)")"     "$(surface 'bdivmod(bmul(bminv(3w)(7w))(3w))(7w)')"
+check "$be surface: the literal 2^64+1 minus 1" "$N64"                        "$(surface 'bsub(18446744073709551617b)(1w)')"
+check "$be surface: bpow(2w)(64w)"       "$N64"                              "$(surface 'bpow(2w)(64w)')"
+check "$be surface: bpow(2w)(256w)"      "$(big 0 0 0 0 1)"                  "$(surface 'bpow(2w)(256w)')"
+check "$be surface: bpow(3w)(0w)"        "$(big 1)"                          "$(surface 'bpow(3w)(0w)')"
+check "$be surface: bminv(3w)(7w) = 5"   "$(big 5)"                          "$(surface 'bminv(3w)(7w)')"
+check "$be surface: 3 * 3^-1 = 1 mod 7"  "$(pair "$(big 2)" "$(big 1)")"     "$(surface 'bdivmod(bmul(bminv(3w)(7w))(3w))(7w)')"
 # the limb list is the C list's answer, not a model's: the word layer's modelled two-limb add of
 # (2^64-1, 0) + (1, 0) is the pair (low 0, high 1) - and the C list, dividing its own sum by 2^64,
 # gives that high limb as the quotient and the low limb as the remainder
-check "-s surface: bdivmod(2^64)(2^64)" "$(pair "$(big 1)" "$(big)")"       "$(surface 'bdivmod(badd(18446744073709551615w)(1w))(bmul(4294967296w)(4294967296w))')"
-# the evaluators that have no limb primitives refuse a program that uses one, and a word primitive
-# on a limb list is refused rather than looped
-for be in stg -n; do
-  flag=${be/stg/}
-  compile 'badd(2w)(3w)' | timeout 60 "$EEZO" $flag -f xbcl >/dev/null 2>&1
-  check "$be refuses a limb primitive (rc 1)" "1" "$?"
-  echo "$M128" | timeout 60 "$EEZO" $flag -f xbcl >/dev/null 2>&1
-  check "$be refuses a limb list (rc 1)" "1" "$?"
+check "$be surface: bdivmod(2^64)(2^64)" "$(pair "$(big 1)" "$(big)")"       "$(surface 'bdivmod(badd(18446744073709551615w)(1w))(bmul(4294967296w)(4294967296w))')"
 done
+# the native JIT has no limb primitives yet: it refuses a program that uses one rather than misrun it (M16b D4)
+compile 'badd(2w)(3w)' | timeout 60 "$EEZO" -n -f xbcl >/dev/null 2>&1
+check "the native JIT refuses a limb primitive (rc 1)" "1" "$?"
+echo "$M128" | timeout 60 "$EEZO" -n -f xbcl >/dev/null 2>&1
+check "the native JIT refuses a limb list (rc 1)" "1" "$?" 
 echo "$(ap3 "$ADD" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")" "$(word 1)")" | timeout 60 "$EEZO" -s -f xbcl >/dev/null 2>&1
 check "-s refuses a word primitive on a limb list (rc 1)" "1" "$?"
 # a limb list has no pure spelling either
