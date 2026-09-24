@@ -145,7 +145,7 @@ done
 # the XBCL leaf 29 carrying two limb lists, and the laws are pow_add and pow_mul from stdlib/tt/nat.tt
 DEN=$(leaf 29)
 D60="$DEN$(big 2)$(big 1152921504606846976)"                      # 2 ^ 2^60: 2^60 bits, one limb of exponent
-for be in -s stg; do
+for be in -s stg -n; do
   flag=${be/stg/}
   check "$be: a power no limb list fits is denoted"  "$D60"  "$(run_s "" "$(ap3 "$BPOW" "$(word 2)" "$(word $((1<<60)))")")"
   check "$be: (2^2^60)^2 is 2^2^61, by pow_mul, nothing built" "$DEN$(big 2)$(big 2305843009213693952)" \
@@ -156,9 +156,6 @@ for be in -s stg; do
   echo "$(ap3 "$BADD" "$D60" "$(word 1)")" | timeout 60 "$EEZO" $flag -f xbcl >/dev/null 2>&1
   check "$be refuses a sum with a denoted number (rc 1)" "1" "$?"
 done
-# the native JIT has no kind for a denoted number yet: it refuses one by name (as it once refused a limb list)
-echo "$D60" | timeout 60 "$EEZO" -n -f xbcl >/dev/null 2>&1
-check "-n refuses a denoted number (rc 1)" "1" "$?"
 
 # what none of the three evaluators has a meaning for: a word primitive on a limb list
 for be in -s stg -n; do
