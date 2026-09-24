@@ -131,6 +131,11 @@ check "$be surface: bpow(2w)(256w)"      "$(big 0 0 0 0 1)"                  "$(
 check "$be surface: bpow(3w)(0w)"        "$(big 1)"                          "$(surface 'bpow(3w)(0w)')"
 check "$be surface: bminv(3w)(7w) = 5"   "$(big 5)"                          "$(surface 'bminv(3w)(7w)')"
 check "$be surface: 3 * 3^-1 = 1 mod 7"  "$(pair "$(big 2)" "$(big 1)")"     "$(surface 'bdivmod(bmul(bminv(3w)(7w))(3w))(7w)')"
+# the modular power, at a modulus whose full power has no limbs to be held in: 3 ^ (2^127 - 3) mod 2^127-1
+# is the inverse of 3 (it is prime), and three times the inverse is 2 * (2^127 - 1) + 1, so the division's
+# pair is exactly (2, 1)
+check "$be surface: 3 * bminv(3w)(2^127-1) = 2P + 1" "$(pair "$(big 2)" "$(big 1)")" \
+      "$(surface 'bdivmod(bmul(bminv(3w)(bsub(bpow(2w)(127w))(1w)))(3w))(bsub(bpow(2w)(127w))(1w))')"
 # the limb list is the C list's answer, not a model's: the word layer's modelled two-limb add of
 # (2^64-1, 0) + (1, 0) is the pair (low 0, high 1) - and the C list, dividing its own sum by 2^64,
 # gives that high limb as the quotient and the low limb as the remainder
