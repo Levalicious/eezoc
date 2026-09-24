@@ -100,7 +100,7 @@ big() { local o; o=$BIGLEAF$(bits 32 $#); for v in "$@"; do o+=$(bits 64 "$v"); 
 N64=$(big 0 1); M64=$(big -1); N128=$(big 0 0 1); M128=$(big -1 -1)
 # The limb list is the C list of limbs (bn.h) itself on the simple interpreter and on the STG machine, which
 # keeps the same list in its heap and hands its limbs to the same functions; the native JIT takes them next.
-for be in -s stg; do
+for be in -s stg -n; do
   flag=${be/stg/}
   run_s() { echo "$2" | timeout 60 "$EEZO" $flag -f xbcl $1; }
 check "$be: badd 2 3"                    "$(big 5)"                          "$(run_s "" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")")"
@@ -136,13 +136,12 @@ check "$be surface: 3 * 3^-1 = 1 mod 7"  "$(pair "$(big 2)" "$(big 1)")"     "$(
 # gives that high limb as the quotient and the low limb as the remainder
 check "$be surface: bdivmod(2^64)(2^64)" "$(pair "$(big 1)" "$(big)")"       "$(surface 'bdivmod(badd(18446744073709551615w)(1w))(bmul(4294967296w)(4294967296w))')"
 done
-# the native JIT has no limb primitives yet: it refuses a program that uses one rather than misrun it (M16b D4)
-compile 'badd(2w)(3w)' | timeout 60 "$EEZO" -n -f xbcl >/dev/null 2>&1
-check "the native JIT refuses a limb primitive (rc 1)" "1" "$?"
-echo "$M128" | timeout 60 "$EEZO" -n -f xbcl >/dev/null 2>&1
-check "the native JIT refuses a limb list (rc 1)" "1" "$?" 
-echo "$(ap3 "$ADD" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")" "$(word 1)")" | timeout 60 "$EEZO" -s -f xbcl >/dev/null 2>&1
-check "-s refuses a word primitive on a limb list (rc 1)" "1" "$?"
+# what none of the three evaluators has a meaning for: a word primitive on a limb list
+for be in -s stg -n; do
+  flag=${be/stg/}
+  echo "$(ap3 "$ADD" "$(ap3 "$BADD" "$(word 2)" "$(word 3)")" "$(word 1)")" | timeout 60 "$EEZO" $flag -f xbcl >/dev/null 2>&1
+  check "$be refuses a word primitive on a limb list (rc 1)" "1" "$?"
+done 
 # a limb list has no pure spelling either
 printf 'badd(2w)(3w)' > "$TMP/l.eezo"
 "$EEZOC" -f bcl < "$TMP/l.eezo" >/dev/null 2>/dev/null; check "bcl refuses a limb list (rc 1)" "1" "$?"
