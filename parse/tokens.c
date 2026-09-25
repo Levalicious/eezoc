@@ -28,36 +28,8 @@ static bool isWordLexeme(Lexeme lexeme) {
     return true;
 }
 
-/* digits then 'b': a limb-list literal. A bignum does not fit the node's one word, so the decimal
-   text goes in a table and the node carries its index (Big(), parse/ast.h); compile.c reads it back
-   through bigLiteralText and builds the C list of limbs (bn.h) that the leaf carries. */
-#define BIG_MAX 4096
-static char *big_texts[BIG_MAX];
-static int big_count;
-
-const char *bigLiteralText(long long index) {
-    return index >= 0 && index < big_count ? big_texts[index] : NULL;
-}
-
-static bool isBigLexeme(Lexeme lexeme) {
-    if (lexeme.length < 2 || lexeme.start[lexeme.length - 1] != 'b')
-        return false;
-    for (unsigned int i = 0; i + 1 < lexeme.length; ++i)
-        if (!isdigit(lexeme.start[i]))
-            return false;
-    return true;
-}
-
 static Node* parseNumber(Lexeme lexeme) {
     Tag tag = newTag(lexeme, NOFIX);
-    if (isBigLexeme(lexeme)) {
-        if (big_count >= BIG_MAX) syntaxError("too many limb-list literals", tag);
-        char *text = rmalloc(lexeme.length);
-        memcpy(text, lexeme.start, lexeme.length - 1);
-        text[lexeme.length - 1] = 0;
-        big_texts[big_count] = text;
-        return Big(tag, big_count++);
-    }
     if (isWordLexeme(lexeme)) {
         errno = 0;
         unsigned long long value = strtoull(lexeme.start, NULL, 10);

@@ -6,20 +6,15 @@ static const char* const Operations[] = {"", "+", "--", "*", "//", "%",
     "up", "(exit)", "(put)", "(get)",
     /* the word primitives (2026-09-13), in the order of libeezo's PrimOp: reserved names */
     "wadd", "wsub", "wmul", "wand", "wor", "wxor", "wshl", "wshr",
-    "weq", "wlt", "waddc", "wsubb", "wmull", "wdivmod",
-    /* the limb primitives (2026-09-16), likewise in PrimOp order: they take limb lists (a machine
-       word is one), and the C list of limbs evaluates them directly */
-    "badd", "bsub", "bmul", "bdivmod", "blt", "beq",
-    "bpow", "bminv"};
+    "weq", "wlt", "waddc", "wsubb", "wmull", "wdivmod"};
 typedef enum {NONE, PLUS, MONUS, TIMES, DIVIDE, MODULO, EQUAL, NOTEQUAL,
       LESSTHAN, GREATERTHAN, LESSTHANOREQUAL, GREATERTHANOREQUAL,
       ABORT, INCREMENT, EXIT, PUT, GET,
       WADD, WSUB, WMUL, WAND, WOR, WXOR, WSHL, WSHR,
-      WEQ, WLT, WADDC, WSUBB, WMULL, WDIVMOD,
-      BADD, BSUB, BMUL, BDIVMOD, BLT, BEQ, BPOW, BMINV} OperationCode;
+      WEQ, WLT, WADDC, WSUBB, WMULL, WDIVMOD} OperationCode;
 
 static inline bool isPseudoOperation(OperationCode c) {
-    return c == ABORT || c == EXIT || c == PUT || c == GET || (c >= WADD && c <= BMINV);
+    return c == ABORT || c == EXIT || c == PUT || c == GET || (c >= WADD && c <= WDIVMOD);
 }
 
 typedef Node Term;

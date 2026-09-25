@@ -18,7 +18,6 @@
 #include "parse/tree.h"
 #include "parse/array.h"
 #include "parse/term.h"
-#include "parse/ast.h"     /* bigLiteralText: the text behind a limb-list literal's index */
 #include <stdlib.h>
 #include <string.h>
 #include "parse/parse.h"
@@ -177,23 +176,17 @@ static Ast *convert_numeral(ConvCtx *ctx, Term *term) {
     Tag tag = getTag(term);
     long long value = getValue(term);
     if (getVariety(term) == 1) return ast_word(ctx->pool, tag_to_loc(tag), (u64)value);   /* 5w */
-    if (getVariety(term) == 2) {   /* digits then b: the C list of limbs, from the parser's text */
-        const char *text = bigLiteralText(value);
-        Bn *b = text ? bn_from_dec(text) : NULL;
-        if (!b) { fprintf(stderr, "Error: bad limb-list literal\n"); return NULL; }
-        return ast_big(ctx->pool, tag_to_loc(tag), b);
-    }
     return ast_num(ctx->pool, tag_to_loc(tag), value);
 }
 
 /*
- * Convert LZ OPERATION to our Ast: the word and limb primitives are pseudo-operations of the parser
+ * Convert LZ OPERATION to our Ast: the word primitives are pseudo-operations of the parser
  * (parse/term.h), in PrimOp order from WADD.
  */
 static Ast *convert_operation(ConvCtx *ctx, Term *term) {
     Tag tag = getTag(term);
     OperationCode code = getOperationCode(term);
-    if (code >= WADD && code <= BMINV) return ast_prim(ctx->pool, tag_to_loc(tag), (PrimOp)(code - WADD));
+    if (code >= WADD && code <= WDIVMOD) return ast_prim(ctx->pool, tag_to_loc(tag), (PrimOp)(code - WADD));
     fprintf(stderr, "Error: operation '%s' is not supported\n", Operations[code]);
     return NULL;
 }

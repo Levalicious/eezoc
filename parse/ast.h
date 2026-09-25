@@ -109,14 +109,6 @@ static inline Node* Word(Tag tag, unsigned long long n) {
     return newLeaf(tag, NUMBER, 1, (long long)n);
 }
 
-/* A limb-list literal (digits then 'b'): a NUMBER of variety 2 carrying an index into the parser's
-   table of decimal texts (a bignum does not fit the node's one word). tokens.c reads it back. */
-static inline Node* Big(Tag tag, long long index) {
-    return newLeaf(tag, NUMBER, 2, index);
-}
-/* The decimal text behind such an index; NULL if out of range. Defined in tokens.c. */
-const char *bigLiteralText(long long index);
-
 static inline Node* Definition(Tag tag, DefinitionVariety variety,
         Node* left, Node* right) {
     return newBranch(tag, DEFINITION, (char)variety, left, right);

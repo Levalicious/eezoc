@@ -63,7 +63,6 @@ static bool resolve_rec(Ast *ast, Env *env) {
     case AST_T:
     case AST_R:
     case AST_WORD:
-    case AST_BIG:
     case AST_PRIM:
     case AST_NUM:
     case AST_STR:
@@ -151,7 +150,7 @@ static KT kconv(AstPool *p, Ast *e, bool *ok) {
         unsigned char *g = rmalloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
         return kt(g, k + 1, ast_i(p, noloc));
     }
-    case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R: case AST_WORD: case AST_BIG: case AST_PRIM:
+    case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R: case AST_WORD: case AST_PRIM:
         return kt_closed(e);
     case AST_ABS: {
         KT b = kconv(p, e->abs.body, ok);
@@ -226,7 +225,6 @@ static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
     case AST_T: return ski_t(pool);
     case AST_R: return ski_r(pool);
     case AST_WORD: return ski_word(pool, comb->word);
-    case AST_BIG: return ski_big(pool, bn_copy(comb->big));   /* the leaf owns its copy: the Ast may be visited again */
     case AST_PRIM: return ski_prim(pool, comb->op);
     case AST_APP: {
         SKITerm *f = comb_to_term(pool, comb->app.func);

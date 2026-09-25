@@ -130,15 +130,6 @@ Ast *ast_word(AstPool *p, SrcLoc loc, u64 w) {
     return a;
 }
 
-Ast *ast_big(AstPool *p, SrcLoc loc, Bn *b) {
-    Ast *a = ast_alloc(p);
-    if (!a) { bn_free(b); return NULL; }
-    a->tag = AST_BIG;
-    a->loc = loc;
-    a->big = b;
-    return a;
-}
-
 Ast *ast_prim(AstPool *p, SrcLoc loc, PrimOp op) {
     Ast *a = ast_alloc(p);
     if (!a) return NULL;
@@ -208,7 +199,6 @@ void ast_print(Ast *a) {
     case AST_T: printf("T"); break;
     case AST_R: printf("R"); break;
     case AST_WORD: printf("%lluw", (unsigned long long)a->word); break;
-    case AST_BIG: { char *d = bn_to_dec(a->big); printf("%sb", d); free(d); break; }
     case AST_PRIM: printf("w%s", prim_name(a->op)); break;
     }
 }
