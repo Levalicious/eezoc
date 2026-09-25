@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 /*
  * compile.c - Source to BCL compilation
  *
@@ -93,7 +94,7 @@ static Ast *convert_variable(ConvCtx *ctx, Term *term) {
         if (gi >= ctx->nglobals) { fprintf(stderr, "Error: global index %zu out of range\n", gi); return NULL; }
         if (!ctx->gast[gi]) {
             Symbol name = tag_to_symbol(tag);
-            char *s = malloc(name.len + 2); s[0] = '$'; memcpy(s + 1, name.str, name.len); s[name.len + 1] = 0;
+            char *s = rmalloc(name.len + 2); s[0] = '$'; memcpy(s + 1, name.str, name.len); s[name.len + 1] = 0;
             ctx->gname[gi] = (Symbol){ s, name.len + 1 };
             BindCtx *saved = ctx->bindings; ctx->bindings = NULL;   /* a definition is a closed term over the earlier globals */
             Ast *v = convert_term_ctx(ctx, getGlobalReferent(term, ctx->globals));

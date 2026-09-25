@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 /*
  * main.c - Eezo compiler
  *
@@ -49,7 +50,7 @@ static char *read_file_contents(const char *path) {
         long size = ftell(f);
         fseek(f, 0, SEEK_SET);
         
-        char *buf = malloc(size + 1);
+        char *buf = rmalloc(size + 1);
         if (!buf) {
             fclose(f);
             return NULL;
@@ -64,7 +65,7 @@ static char *read_file_contents(const char *path) {
     /* Non-seekable (pipe, stdin): read in chunks */
     size_t cap = 4096;
     size_t len = 0;
-    char *buf = malloc(cap);
+    char *buf = rmalloc(cap);
     if (!buf) {
         if (!is_stdin) fclose(f);
         return NULL;
@@ -75,7 +76,7 @@ static char *read_file_contents(const char *path) {
         len += nread;
         if (len + 1 >= cap) {
             cap *= 2;
-            char *newbuf = realloc(buf, cap);
+            char *newbuf = rrealloc(buf, cap);
             if (!newbuf) {
                 free(buf);
                 if (!is_stdin) fclose(f);
@@ -157,7 +158,7 @@ static void scan_imports(int idx) {
             
             if (line > start && files[idx].nimports < MAX_IMPORTS) {
                 size_t len = line - start;
-                char *imp = malloc(len + 1);
+                char *imp = rmalloc(len + 1);
                 memcpy(imp, start, len);
                 imp[len] = '\0';
                 files[idx].imports[files[idx].nimports++] = imp;
@@ -185,7 +186,7 @@ static char *resolve_import(const char *base_path, const char *import_name) {
     
     /* Try 1: relative to importing file */
     size_t len = strlen(dir) + strlen(import_name) + 6;
-    char *path = malloc(len + 1);
+    char *path = rmalloc(len + 1);
     snprintf(path, len + 1, "%s%s.eezo", dir, import_name);
     
     if (access(path, F_OK) == 0) {
@@ -196,7 +197,7 @@ static char *resolve_import(const char *base_path, const char *import_name) {
     
     /* Try 2: in stdlib/ relative to importing file */
     len = strlen(dir) + 7 + strlen(import_name) + 6;
-    path = malloc(len + 1);
+    path = rmalloc(len + 1);
     snprintf(path, len + 1, "%sstdlib/%s.eezo", dir, import_name);
     
     if (access(path, F_OK) == 0) {
@@ -207,7 +208,7 @@ static char *resolve_import(const char *base_path, const char *import_name) {
     
     /* Try 3: in absolute STDLIB_PATH */
     len = strlen(STDLIB_PATH) + 1 + strlen(import_name) + 6;
-    path = malloc(len + 1);
+    path = rmalloc(len + 1);
     snprintf(path, len + 1, "%s/%s.eezo", STDLIB_PATH, import_name);
 
     free(dir);
@@ -284,7 +285,7 @@ static void free_import_graph(void) {
 /* Concatenate files, stripping import lines */
 static char *concat_files_strip_imports(int nfiles, char **paths) {
     /* Read all files first (handles stdin/pipes) */
-    char **contents = malloc(nfiles * sizeof(char*));
+    char **contents = rmalloc(nfiles * sizeof(char*));
     if (!contents) return NULL;
     
     size_t total = 0;
@@ -298,7 +299,7 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
         total += strlen(contents[i]) + 2;  /* +2 for newline and safety */
     }
     
-    char *buf = malloc(total + 1);
+    char *buf = rmalloc(total + 1);
     if (!buf) {
         for (int i = 0; i < nfiles; i++) free(contents[i]);
         free(contents);
@@ -422,9 +423,9 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
         if (emit_elf) {
             /* Allocate code buffer */
             u32 code_cap = 64 * 1024;
-            u8 *code_buf = malloc(code_cap);
+            u8 *code_buf = rmalloc(code_cap);
             if (!code_buf) {
-                fprintf(stderr, "Out of memory\n");
+                fprintf(stderr, "resource limit: out of memory\n");
                 free(source);
                 return 1;
             }
@@ -488,9 +489,9 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             size_bits = jot_size(ski);
         }
         u32 buf_size = (size_bits + 7) / 8 + 8;  /* +8 for safety */
-        u8 *buf = malloc(buf_size);
+        u8 *buf = rmalloc(buf_size);
         if (!buf) {
-            fprintf(stderr, "Out of memory\n");
+            fprintf(stderr, "resource limit: out of memory\n");
             free(source);
             return 1;
         }
@@ -557,8 +558,8 @@ static void usage(const char *prog) {
     fprintf(stderr, "\nOptions:\n");
     fprintf(stderr, "  -v            Verbose (show SKI, compilation order)\n");
     fprintf(stderr, "  -f FORMAT     Output encoding: bcl (default), jot, jomplement, xbcl\n");
-    fprintf(stderr, "                (xbcl carries machine words: literals 5w, wadd wsub wmul wand wor wxor wshl wshr\n");
-    fprintf(stderr, "                 weq wlt waddc wsubb wmull wdivmod; the pure formats refuse them)\n");
+    fprintf(stderr, "                (xbcl carries machine words: a literal 5w and the word primitives wadd wsub wmul wand\n");
+    fprintf(stderr, "                 wor wxor wshl wshr weq wlt waddc wsubb wmull wdivmod; the pure formats refuse them)\n");
     fprintf(stderr, "  -e            Emit standalone ELF executable instead of bytecode\n");
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");

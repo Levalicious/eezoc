@@ -1,3 +1,4 @@
+#include <libeezo/res.h>
 /*
  * node.c - Parse tree node implementation
  */
@@ -34,7 +35,7 @@ static Node *freelist = NULL;
 static u32 pool_used = 0;
 
 void node_init(void) {
-    pool = calloc(POOL_SIZE, sizeof(Node));
+    pool = rcalloc(POOL_SIZE, sizeof(Node));
     freelist = NULL;
     pool_used = 0;
 }

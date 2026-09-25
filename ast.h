@@ -83,7 +83,7 @@ struct Ast {
         
         /* AST_WORD: the word */
         u64 word;
-        
+
         /* AST_PRIM: the primitive */
         PrimOp op;
         
