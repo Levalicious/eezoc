@@ -95,7 +95,9 @@ static Hold* synthesize(Token (*lexer)(Token), Token start) {
                 && token.type != SPACE)
             shiftNode(stack, parseToken(token));
     Hold* ast = hold(getTop(stack));
-    syntaxErrorNodeIf(ast == startNode, "no input", ast);
+    /* an empty program (nothing, or only whitespace and comments) leaves the stack empty: the start marker was shifted away
+       and there is no top, not the start node - the test as it stood let a NULL through to bind (M20 found the segfault) */
+    syntaxErrorIf(ast == NULL || ast == startNode, "no input", newTag(start.lexeme, NOFIX));
     deleteStack(stack);
     return ast;
 }
