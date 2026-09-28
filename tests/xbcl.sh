@@ -7,8 +7,9 @@
 # that takes XBCL.
 #
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EEZO="${SCRIPT_DIR}/../eezo/eezo"
-EEZOC="${SCRIPT_DIR}/../eezoc/eezoc"
+WS="${EEZO_WS:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"   # the workspace: this repository and its siblings (libeezo, eezo, eezoc, eezott, stdlib)
+EEZO="${EEZO:-$WS/eezo/eezo}"
+EEZOC="${EEZOC:-$WS/eezoc/eezoc}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 status=0

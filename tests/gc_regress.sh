@@ -18,8 +18,9 @@
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EEZOC="${SCRIPT_DIR}/../eezoc/eezoc"
-EEZO="${SCRIPT_DIR}/../eezo/eezo"
+WS="${EEZO_WS:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"   # the workspace: this repository and its siblings (libeezo, eezo, eezoc, eezott, stdlib)
+EEZOC="${EEZOC:-$WS/eezoc/eezoc}"
+EEZO="${EEZO:-$WS/eezo/eezo}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 status=0

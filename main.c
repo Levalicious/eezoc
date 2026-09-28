@@ -23,7 +23,15 @@
 #include "parse/parse.h"
 #include "parse/opp/operator.h"
 
-#define STDLIB_PATH "/home/lev/.local/share/eezo/stdlib"
+/* the installed library: the mkfile passes -DSTDLIB_DIR=$PREFIX/share/eezo/stdlib (where 'mk install' in the stdlib repository
+   puts the modules), stringified here since mk quotes nothing; EEZO_STDLIB in the environment overrides it at run time */
+#define STDLIB_STR_(x) #x
+#define STDLIB_STR(x) STDLIB_STR_(x)
+#ifdef STDLIB_DIR
+#define STDLIB_PATH STDLIB_STR(STDLIB_DIR)
+#else
+#define STDLIB_PATH "/usr/local/share/eezo/stdlib"
+#endif
 
 /* Forward declaration - defined in parse/lexeme.c */
 void set_file_boundaries_ex(int n, const char **filenames, const unsigned short *start_lines,
@@ -206,10 +214,11 @@ static char *resolve_import(const char *base_path, const char *import_name) {
     }
     free(path);
     
-    /* Try 3: in absolute STDLIB_PATH */
-    len = strlen(STDLIB_PATH) + 1 + strlen(import_name) + 6;
+    /* Try 3: the installed library: $EEZO_STDLIB if set, else the STDLIB_PATH compiled in */
+    const char *stdlib_path = getenv("EEZO_STDLIB"); if (!stdlib_path || !*stdlib_path) stdlib_path = STDLIB_PATH;
+    len = strlen(stdlib_path) + 1 + strlen(import_name) + 6;
     path = rmalloc(len + 1);
-    snprintf(path, len + 1, "%s/%s.eezo", STDLIB_PATH, import_name);
+    snprintf(path, len + 1, "%s/%s.eezo", stdlib_path, import_name);
 
     free(dir);
     return path;  /* Return this even if not found - will fail later with clear error */

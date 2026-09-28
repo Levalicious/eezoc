@@ -50,7 +50,7 @@ HFILES=\
 	parse/lex/lex.h\
 	parse/opp/operator.h\
 
-CFLAGS=-g -O2 -Wall -I.
+CFLAGS=-g -O2 -Wall -I. -DSTDLIB_DIR=$PREFIX/share/eezo/stdlib   # the installed library (mk install in the stdlib repository); main.c stringifies it
 
 LIBS=../libeezo
 
