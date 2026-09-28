@@ -18,4 +18,4 @@ jobs:
       - name: the standard library where eezoc looks for imports ($PREFIX/share/eezo/stdlib)
         run: (cd stdlib && mk install)
       - name: suites
-        run: for t in e2e modes gc_regress io xbcl; do bash eezoc/tests/$t.sh || exit 1; done
+        run: for t in e2e modes gc_regress stream io xbcl; do bash eezoc/tests/$t.sh || exit 1; done

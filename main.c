@@ -573,6 +573,8 @@ static void usage(const char *prog) {
     fprintf(stderr, "  -N MODE       (with -e) normalization: nf (default) or whnf\n");
     fprintf(stderr, "  -H BYTES      (with -e) initial semispace size, default 16MiB; grows on demand\n");
     fprintf(stderr, "  -i            (with -e) stream I/O mode: the executable maps stdin to stdout\n");
+    fprintf(stderr, "  -m            (with -e) monadic I/O mode: the program is run(m) of the stdlib's io.eezo;\n");
+    fprintf(stderr, "                the executable performs its actions (putc, getc, exit)\n");
     fprintf(stderr, "  -h            Show this help\n");
     fprintf(stderr, "\nInput is read from stdin. Output bytecode written to stdout.\n");
     fprintf(stderr, "Use 'eezo' to evaluate the compiled output.\n");
@@ -613,6 +615,8 @@ int main(int argc, char **argv) {
             }
         } else if (strcmp(argv[i], "-i") == 0) {
             io_mode = 1;
+        } else if (strcmp(argv[i], "-m") == 0) {
+            io_mode = 2;
         } else if (strcmp(argv[i], "-N") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Missing argument for -N\n");
