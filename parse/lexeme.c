@@ -1,24 +1,26 @@
 #include <stdbool.h>
 #include <string.h>
+#include <libeezo/mem.h>
 #include "util.h"   // fputll
 #include "lexeme.h"
 
 const Lexeme EMPTY = {.location={0}, .length=0, .start=""};
-const char* FILENAMES[2048] = {0};
-const unsigned int MAX_FILENAMES = sizeof(FILENAMES) / sizeof(const char*);
+/* the source files' names, by the index a Location carries (index 0: none): a Stack of the memory layer */
+static Stack FILENAMES = { NULL, 0, 0, sizeof(const char *) };
 unsigned short FILE_COUNT = 0;
 
-/* File boundary mapping for concatenated sources */
-#define MAX_FILE_BOUNDARIES 256
-static struct {
+/* File boundary mapping for concatenated sources: one per file, however many */
+typedef struct {
     const char *filename;
     unsigned short start_line;  /* First line of this file (1-based, in concat) */
     unsigned short import_count; /* Number of #import lines stripped */
-} file_boundaries[MAX_FILE_BOUNDARIES];
+} FileBoundary;
+static FileBoundary *file_boundaries = NULL;
 static int num_boundaries = 0;
+static void boundaries_room(int n) { file_boundaries = rrealloc(file_boundaries, (size_t)(n + 1) * sizeof(FileBoundary)); }
 
 void set_file_boundaries(int n, const char **filenames, const unsigned short *start_lines) {
-    num_boundaries = (n > MAX_FILE_BOUNDARIES) ? MAX_FILE_BOUNDARIES : n;
+    boundaries_room(n); num_boundaries = n;
     for (int i = 0; i < num_boundaries; i++) {
         file_boundaries[i].filename = filenames[i];
         file_boundaries[i].start_line = start_lines[i];
@@ -28,7 +30,7 @@ void set_file_boundaries(int n, const char **filenames, const unsigned short *st
 
 void set_file_boundaries_ex(int n, const char **filenames, const unsigned short *start_lines,
                             const unsigned short *import_counts) {
-    num_boundaries = (n > MAX_FILE_BOUNDARIES) ? MAX_FILE_BOUNDARIES : n;
+    boundaries_room(n); num_boundaries = n;
     for (int i = 0; i < num_boundaries; i++) {
         file_boundaries[i].filename = filenames[i];
         file_boundaries[i].start_line = start_lines[i];
@@ -60,11 +62,13 @@ Lexeme newLiteralLexeme(const char* start, Location location) {
     return newLexeme(start, (unsigned short)strlen(start), location);
 }
 
+/* a file's index for its Locations. The index is a Location's 16-bit field: past that width a file gets 0, no name
+   (its diagnostics say less; nothing else depends on it) */
 unsigned short newFilename(const char* filename) {
-    if (FILE_COUNT >= MAX_FILENAMES - 1)
-        return 0;
-    FILENAMES[++FILE_COUNT] = filename;
-    return FILE_COUNT;
+    if (FILE_COUNT == 0xFFFF) return 0;
+    if (FILENAMES.n == 0) STACK_PUSH(&FILENAMES, const char *, NULL);   /* index 0: none */
+    STACK_PUSH(&FILENAMES, const char *, filename);
+    return ++FILE_COUNT;
 }
 
 Location newLocation(unsigned short file,
@@ -95,7 +99,7 @@ void printLocation(Location location, FILE* stream) {
     const char *filename = NULL;
     
     if (location.file != 0) {
-        filename = FILENAMES[location.file];
+        filename = STACK_AT(&FILENAMES, const char *, location.file);
     } else {
         /* Try to map via file boundaries */
         unsigned short local_line;

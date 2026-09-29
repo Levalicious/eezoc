@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <libeezo/mem.h>
 #include <stdlib.h>
 #include "util.h"
 #include "readfile.h"
@@ -15,14 +16,14 @@ char* readfile(FILE* stream) {
         length += (size_t)bytesRead * sizeof(char);
         if (length == bufferLength) {
             bufferLength += READ_CHUNK_SIZE;
-            buffer = realloc(buffer, bufferLength * sizeof(char));
+            buffer = rrealloc(buffer, bufferLength * sizeof(char));
         }
         bytesRead = fread(buffer + length, sizeof(char),
             (bufferLength - length), stream);
     } while (bytesRead > 0);
 
     if (length == bufferLength)
-        buffer = realloc(buffer, (length + 1) * sizeof(char));
+        buffer = rrealloc(buffer, (length + 1) * sizeof(char));
     buffer[length] = '\0';
     return buffer;
 }

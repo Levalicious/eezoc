@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 #include <stdlib.h>     // llabs
 #include <stdio.h>
 #include "util.h"
@@ -9,11 +9,7 @@ void* error(const char* message) {
     return NULL;
 }
 
-void* smalloc(size_t size) {
-    void* p = malloc(size);
-    if (p == NULL && size > 0) resource_die("out of memory (%zu bytes)", size);
-    return p;
-}
+void* smalloc(size_t size) { return rmalloc(size); }   /* the memory layer's (libeezo/mem.h) */
 
 static char getDigitCharacter(long long n) {
     return n < 0 || n >= 16 ? '#' : (char)(n < 10 ? '0' + n : 'a' + (n - 10));

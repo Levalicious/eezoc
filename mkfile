@@ -7,13 +7,10 @@ OFILES=\
 	ast.$O\
 	bracket.$O\
 	compile.$O\
-	lib/lexeme.$O\
-	lib/node.$O\
 	parse/lexeme.$O\
 	parse/tree.$O\
 	parse/stack.$O\
 	parse/array.$O\
-	parse/pool.$O\
 	parse/freelist.$O\
 	parse/readfile.$O\
 	parse/util.$O\
@@ -31,15 +28,12 @@ OFILES=\
 HFILES=\
 	../libeezo/native.h\
 	../libeezo/term.h\
-	lib/lexeme.h\
-	lib/node.h\
 	ast.h\
 	bracket.h\
 	compile.h\
 	parse/tree.h\
 	parse/array.h\
 	parse/stack.h\
-	parse/pool.h\
 	parse/freelist.h\
 	parse/lexeme.h\
 	parse/util.h\

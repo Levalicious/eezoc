@@ -1,47 +1,33 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 #include <assert.h>
 #include <stdlib.h>
 #include "util.h"
 #include "array.h"
 
-struct Array {
-    size_t capacity, length;
-    void** elements;
-};
+struct Array { Stack s; };   /* a Stack of the memory layer (libeezo/mem.h) */
 
-size_t length(const Array* array) {return array->length;}
+size_t length(const Array* array) {return array->s.n;}
 
 Array* newArray(size_t initialCapacity) {
-    Array* array = (Array*)smalloc(sizeof(Array));
-    array->capacity = initialCapacity;
-    array->length = 0;
-    array->elements = (void**)smalloc(initialCapacity * sizeof(void*));
+    Array* array = (Array*)rmalloc(sizeof(Array));
+    stack_init(&array->s, sizeof(void*));
+    stack_reserve(&array->s, initialCapacity);
     return array;
 }
 
 void deleteArray(Array* array) {
-    if (array->elements != NULL)
-        free(array->elements);      // may be NULL if capacity is zero
+    stack_drop(&array->s);
     free(array);
 }
 
-void append(Array* array, void* value) {
-    if (array->length == array->capacity) {
-        array->capacity = array->capacity == 0 ? 1 : 2 * array->capacity;
-        size_t newSize = array->capacity * sizeof(void*);
-        array->elements = realloc(array->elements, newSize);
-        if (array->elements == NULL)
-            resource_die("out of memory");
-    }
-    array->elements[array->length++] = value;
-}
+void append(Array* array, void* value) { STACK_PUSH(&array->s, void*, value); }
 
 void* unappend(Array* array) {
-    assert(array->length > 0);
-    return array->elements[array->length--];
+    assert(array->s.n > 0);
+    return STACK_POP(&array->s, void*);
 }
 
 void* elementAt(const Array* array, size_t index) {
-    assert(index < array->length);
-    return array->elements[index];
+    assert(index < array->s.n);
+    return STACK_AT(&array->s, void*, index);
 }
