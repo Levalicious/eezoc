@@ -41,6 +41,8 @@ run exit7 '#import io\nrun(seq(putbyte(65))(halt(7)))'                          
 run echo  '#import io\nrun(seq(putbyte(62))(bind(getbyte)(b -> seq(putbyte(b))(seq(putbyte(10))(halt(3))))))' 'Z' '>Z\n' 3
 # getbyte gives 256 at the end of the input: copy until then
 run cat   '#import io\n#import nat\n#import bool\ncat := fix(loop -> bind(getbyte)(b -> if(isZero(sub(b)(255)))(seq(putbyte(b))(loop))(halt(zero))))\nrun(cat)' 'hello\n' 'hello\n' 0
+# lines over bytes: getline drops the newline, putline adds one; the second read ends at the end of the input
+run line  '#import io\nrun(bind(getline)(l -> seq(putline(l))(bind(getline)(m -> putline(m)))))'  'ab\ncd' 'ab\ncd\n' 0
 # pure has nothing to perform: the program finishes with status 0, its result unobserved
 run pure  '#import io\nrun(pure(zero))'                                                 ''      ''     0
 
