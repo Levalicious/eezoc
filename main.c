@@ -363,7 +363,7 @@ static OutputFormat emit_mode_to_output_format(EmitMode mode) {
 /* Compile files with import resolution */
 /* returns 0 on success, 1 on any failure: the exit status of the compiler (a failed compilation must not look like one) */
 static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp, 
-                          int verbose, EmitMode mode, int emit_elf, int nf_mode, u32 heap_size, int io_mode) {
+                          int verbose, EmitMode mode, int emit_elf, int nf_mode, u64 heap_size, int io_mode) {
     /* Resolve imports and toposort */
     int sorted_count;
     char **sorted = resolve_imports(nfiles, files, &sorted_count);
@@ -408,7 +408,7 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             
             /* Emit ELF */
             u8 *elf;
-            u32 elf_size;
+            u64 elf_size;
             /* The ELF evaluates the term as the chosen format would carry it: a pure format
              * spells B C T R as S K trees (and cannot spell words), XBCL keeps the leaves. */
             if (mode != EMIT_XBCL) {
@@ -427,7 +427,7 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
                 /* Write binary to stdout */
                 fwrite(elf, 1, elf_size, stdout);
                 if (verbose) {
-                    fprintf(stderr, "Emitted ELF (%u bytes)\n", elf_size);
+                    fprintf(stderr, "Emitted ELF (%llu bytes)\n", (unsigned long long)elf_size);
                 }
                 free(elf);
             } else {
@@ -515,7 +515,7 @@ int main(int argc, char **argv) {
     int emit_elf = 0;
     int nf_mode = 1;
     int io_mode = 0;
-    u32 heap_size = NATIVE_DEFAULT_HEAP_SIZE;
+    u64 heap_size = NATIVE_DEFAULT_HEAP_SIZE;
     
     /* Parse options */
     for (int i = 1; i < argc; i++) {
@@ -531,7 +531,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Missing argument for -H\n");
                 return 1;
             }
-            heap_size = (u32)strtoul(argv[i], NULL, 0);
+            heap_size = (u64)strtoull(argv[i], NULL, 0);
             if (heap_size < 4096) {
                 fprintf(stderr, "Heap size too small: %s\n", argv[i]);
                 return 1;
