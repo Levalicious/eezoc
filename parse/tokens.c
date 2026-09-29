@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>

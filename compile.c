@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 /*
  * compile.c - Source to BCL compilation
  *
@@ -223,8 +223,8 @@ static Ast *convert_term(AstPool *pool, Term *term, Array *globals) {
         .pool = pool,
         .globals = globals,
         .bindings = NULL,
-        .gast = calloc(n + 1, sizeof(Ast *)),
-        .gname = calloc(n + 1, sizeof(Symbol)),
+        .gast = rcalloc(n + 1, sizeof(Ast *)),
+        .gname = rcalloc(n + 1, sizeof(Symbol)),
         .nglobals = n
     };
     Ast *body = convert_term_ctx(&ctx, term);

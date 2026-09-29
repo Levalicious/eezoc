@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 /*
  * ast.c - AST implementation
  */
@@ -7,29 +7,12 @@
 #include <stdio.h>
 #include <string.h>
 
-void ast_pool_init(AstPool *p, u32 capacity) {
-    p->pool = rcalloc(capacity, sizeof(Ast));
-    p->capacity = capacity;
-    p->next = 0;
-}
-
-void ast_pool_free(AstPool *p) {
-    free(p->pool);
-    p->pool = NULL;
-    p->capacity = 0;
-}
-
-static Ast *ast_alloc(AstPool *p) {
-    if (p->next >= p->capacity) {
-        fprintf(stderr, "Error: AST pool exhausted (%u nodes)\n", p->capacity);
-        return NULL;
-    }
-    return &p->pool[p->next++];
-}
+void ast_pool_init(AstPool *p) { p->a = (Arena){ 0 }; }
+void ast_pool_free(AstPool *p) { arena_drop(&p->a); }
+static Ast *ast_alloc(AstPool *p) { return arena_alloc(&p->a, sizeof(Ast)); }
 
 Ast *ast_var(AstPool *p, SrcLoc loc, Symbol name) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_VAR;
     a->loc = loc;
     a->var.name = name;
@@ -39,7 +22,6 @@ Ast *ast_var(AstPool *p, SrcLoc loc, Symbol name) {
 
 Ast *ast_debruijn(AstPool *p, SrcLoc loc, u32 index) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_VAR;
     a->loc = loc;
     a->var.name = (Symbol){ .str = "_", .len = 1 };
@@ -49,7 +31,6 @@ Ast *ast_debruijn(AstPool *p, SrcLoc loc, u32 index) {
 
 Ast *ast_abs(AstPool *p, SrcLoc loc, Symbol param, Ast *body) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_ABS;
     a->loc = loc;
     a->abs.param = param;
@@ -59,7 +40,6 @@ Ast *ast_abs(AstPool *p, SrcLoc loc, Symbol param, Ast *body) {
 
 Ast *ast_app(AstPool *p, SrcLoc loc, Ast *func, Ast *arg) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_APP;
     a->loc = loc;
     a->app.func = func;
@@ -69,7 +49,6 @@ Ast *ast_app(AstPool *p, SrcLoc loc, Ast *func, Ast *arg) {
 
 Ast *ast_let(AstPool *p, SrcLoc loc, Symbol name, Ast *value, Ast *body) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_LET;
     a->loc = loc;
     a->let.name = name;
@@ -80,7 +59,6 @@ Ast *ast_let(AstPool *p, SrcLoc loc, Symbol name, Ast *value, Ast *body) {
 
 Ast *ast_num(AstPool *p, SrcLoc loc, i64 n) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_NUM;
     a->loc = loc;
     a->num = n;
@@ -89,7 +67,6 @@ Ast *ast_num(AstPool *p, SrcLoc loc, i64 n) {
 
 Ast *ast_str(AstPool *p, SrcLoc loc, const char *data, u32 len) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_STR;
     a->loc = loc;
     a->str.data = data;
@@ -99,7 +76,6 @@ Ast *ast_str(AstPool *p, SrcLoc loc, const char *data, u32 len) {
 
 Ast *ast_s(AstPool *p, SrcLoc loc) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_S;
     a->loc = loc;
     return a;
@@ -107,7 +83,6 @@ Ast *ast_s(AstPool *p, SrcLoc loc) {
 
 Ast *ast_k(AstPool *p, SrcLoc loc) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_K;
     a->loc = loc;
     return a;
@@ -115,7 +90,6 @@ Ast *ast_k(AstPool *p, SrcLoc loc) {
 
 Ast *ast_i(AstPool *p, SrcLoc loc) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_I;
     a->loc = loc;
     return a;
@@ -123,7 +97,6 @@ Ast *ast_i(AstPool *p, SrcLoc loc) {
 
 Ast *ast_word(AstPool *p, SrcLoc loc, u64 w) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_WORD;
     a->loc = loc;
     a->word = w;
@@ -132,7 +105,6 @@ Ast *ast_word(AstPool *p, SrcLoc loc, u64 w) {
 
 Ast *ast_prim(AstPool *p, SrcLoc loc, PrimOp op) {
     Ast *a = ast_alloc(p);
-    if (!a) return NULL;
     a->tag = AST_PRIM;
     a->loc = loc;
     a->op = op;

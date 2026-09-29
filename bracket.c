@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 #include "bracket.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -167,7 +167,6 @@ static KT kconv(AstPool *p, Ast *e, bool *ok) {
     }
     case AST_NUM: {
         Ast *acc = expand_num(p, e->num);
-        if (!acc) { *ok = false; return kt_closed(e); }
         if (!resolve_rec(acc, NULL)) { *ok = false; return kt_closed(e); }
         return kconv(p, acc, ok);
     }

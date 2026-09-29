@@ -14,6 +14,7 @@
 #define AST_H
 
 #include <libeezo/types.h>
+#include <libeezo/mem.h>
 #include <libeezo/term.h>   /* PrimOp */
 
 typedef enum {
@@ -95,14 +96,11 @@ struct Ast {
     };
 };
 
-/* AST allocation pool */
-typedef struct {
-    Ast *pool;
-    u32 capacity;
-    u32 next;
-} AstPool;
+/* AST allocation: an arena of the memory layer (libeezo/mem.h) - the nodes live until the pool goes, it grows, and no
+ * constructor returns NULL for want of memory */
+typedef struct { Arena a; } AstPool;
 
-void ast_pool_init(AstPool *p, u32 capacity);
+void ast_pool_init(AstPool *p);
 void ast_pool_free(AstPool *p);
 
 /* Constructors */

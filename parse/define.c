@@ -3,6 +3,8 @@
 #include "ast.h"
 #include "patterns.h"
 #include "define.h"
+#include "util.h"
+#include <stdlib.h>
 
 bool isIO = false;
 
@@ -165,7 +167,8 @@ static Node* applyADTDefinition(Tag tag, Node* left, Node* adt, Node* scope) {
     Node* forms = getRight(adt);
     Node* node = forms;
     unsigned int n = forms == NULL ? 0 : getArgumentCount(forms);
-    unsigned int ms[256]; // store the number of arguments for each constructor
+    // the number of arguments for each constructor, however many constructors (a fixed 256 overran the C stack)
+    unsigned int* ms = (unsigned int*)smalloc((n + 1) * sizeof(unsigned int));
 
     for (unsigned int i = 0; i < n; ++i, node = getLeft(node))
         ms[n - i - 1] = getArgumentCount(getRight(node));
@@ -179,6 +182,7 @@ static Node* applyADTDefinition(Tag tag, Node* left, Node* adt, Node* scope) {
         scope = newConstructorDefinition(tag, form, scope, n - i - 1, n);
         scope = newDeconstructorDefinition(tag, form, scope, ms, n - i - 1, n);
     }
+    free(ms);
 
     // define ADT name, but make it forbidden to access because the defined
     // value is fake since this interpreter doesn't support types

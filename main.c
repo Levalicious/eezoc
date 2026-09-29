@@ -1,4 +1,4 @@
-#include <libeezo/res.h>
+#include <libeezo/mem.h>
 /*
  * main.c - Eezo compiler
  *
@@ -59,10 +59,6 @@ static char *read_file_contents(const char *path) {
         fseek(f, 0, SEEK_SET);
         
         char *buf = rmalloc(size + 1);
-        if (!buf) {
-            fclose(f);
-            return NULL;
-        }
         
         size_t nread = fread(buf, 1, size, f);
         buf[nread] = '\0';
@@ -74,23 +70,13 @@ static char *read_file_contents(const char *path) {
     size_t cap = 4096;
     size_t len = 0;
     char *buf = rmalloc(cap);
-    if (!buf) {
-        if (!is_stdin) fclose(f);
-        return NULL;
-    }
     
     size_t nread;
     while ((nread = fread(buf + len, 1, cap - len - 1, f)) > 0) {
         len += nread;
         if (len + 1 >= cap) {
             cap *= 2;
-            char *newbuf = rrealloc(buf, cap);
-            if (!newbuf) {
-                free(buf);
-                if (!is_stdin) fclose(f);
-                return NULL;
-            }
-            buf = newbuf;
+            buf = rrealloc(buf, cap);
         }
     }
     buf[len] = '\0';
@@ -106,7 +92,7 @@ static char *read_file_or_cache(const char *path) {
         if (!stdin_cache) {
             stdin_cache = read_file_contents("-");
         }
-        return stdin_cache ? strdup(stdin_cache) : NULL;
+        return stdin_cache ? rstrdup(stdin_cache) : NULL;
     }
     return read_file_contents(path);
 }
@@ -115,39 +101,31 @@ static char *read_file_or_cache(const char *path) {
  * Import graph and toposort
  */
 
-#define MAX_FILES 256
-#define MAX_IMPORTS 32
-
+/* the graph on Stacks of the memory layer (libeezo/mem.h): any number of files, and of imports per file */
 typedef struct {
     char *path;
-    char *imports[MAX_IMPORTS];
-    int nimports;
+    Stack imports;   /* char * */
     int visited;  /* 0=unvisited, 1=visiting, 2=done */
 } FileNode;
 
-static FileNode files[MAX_FILES];
-static int nfiles_graph = 0;
-static char *sorted_files[MAX_FILES];
-static int nsorted = 0;
+static Stack files = { NULL, 0, 0, sizeof(FileNode) };
+#define FILE_AT(i) STACK_AT(&files, FileNode, i)
+static Stack sorted_files = { NULL, 0, 0, sizeof(char *) };
 
 static int find_or_add_file(const char *path) {
-    for (int i = 0; i < nfiles_graph; i++) {
-        if (strcmp(files[i].path, path) == 0) return i;
+    for (size_t i = 0; i < files.n; i++) {
+        if (strcmp(FILE_AT(i).path, path) == 0) return (int)i;
     }
-    if (nfiles_graph >= MAX_FILES) {
-        fprintf(stderr, "Too many files\n");
-        return -1;
-    }
-    int idx = nfiles_graph++;
-    files[idx].path = strdup(path);
-    files[idx].nimports = 0;
-    files[idx].visited = 0;
-    return idx;
+    FileNode *f = stack_push(&files);
+    f->path = rstrdup(path);
+    stack_init(&f->imports, sizeof(char *));
+    f->visited = 0;
+    return (int)files.n - 1;
 }
 
 /* Extract imports from file content - lines starting with "import " */
 static void scan_imports(int idx) {
-    char *content = read_file_or_cache(files[idx].path);
+    char *content = read_file_or_cache(FILE_AT(idx).path);
     if (!content) return;
     
     char *line = content;
@@ -164,12 +142,12 @@ static void scan_imports(int idx) {
             char *start = line;
             while (*line && *line != '\n' && *line != ' ' && *line != '\t') line++;
             
-            if (line > start && files[idx].nimports < MAX_IMPORTS) {
+            if (line > start) {
                 size_t len = line - start;
                 char *imp = rmalloc(len + 1);
                 memcpy(imp, start, len);
                 imp[len] = '\0';
-                files[idx].imports[files[idx].nimports++] = imp;
+                STACK_PUSH(&FILE_AT(idx).imports, char *, imp);
             }
         }
         
@@ -183,13 +161,13 @@ static void scan_imports(int idx) {
 /* Resolve import name to file path */
 static char *resolve_import(const char *base_path, const char *import_name) {
     /* Get directory of base file */
-    char *dir = strdup(base_path);
+    char *dir = rstrdup(base_path);
     char *slash = strrchr(dir, '/');
     if (slash) {
         slash[1] = '\0';
     } else {
         free(dir);
-        dir = strdup("./");
+        dir = rstrdup("./");
     }
     
     /* Try 1: relative to importing file */
@@ -226,46 +204,45 @@ static char *resolve_import(const char *base_path, const char *import_name) {
 
 /* Toposort via DFS - returns 0 on success, -1 on cycle */
 static int toposort_visit(int idx, const char *base_path) {
-    if (files[idx].visited == 2) return 0;  /* Already done */
-    if (files[idx].visited == 1) {
-        fprintf(stderr, "Circular import: %s\n", files[idx].path);
+    if (FILE_AT(idx).visited == 2) return 0;  /* Already done */
+    if (FILE_AT(idx).visited == 1) {
+        fprintf(stderr, "Circular import: %s\n", FILE_AT(idx).path);
         return -1;
     }
     
-    files[idx].visited = 1;  /* Visiting */
+    FILE_AT(idx).visited = 1;  /* Visiting */
     
     /* Visit dependencies first */
-    for (int i = 0; i < files[idx].nimports; i++) {
-        char *dep_path = resolve_import(files[idx].path, files[idx].imports[i]);
+    for (size_t i = 0; i < FILE_AT(idx).imports.n; i++) {
+        char *dep_path = resolve_import(FILE_AT(idx).path, STACK_AT(&FILE_AT(idx).imports, char *, i));
         int dep_idx = find_or_add_file(dep_path);
         if (dep_idx < 0) {
             free(dep_path);
             return -1;
         }
-        if (files[dep_idx].nimports == 0) {
+        if (FILE_AT(dep_idx).imports.n == 0) {
             scan_imports(dep_idx);
         }
-        if (toposort_visit(dep_idx, files[idx].path) < 0) {
+        if (toposort_visit(dep_idx, FILE_AT(idx).path) < 0) {
             free(dep_path);
             return -1;
         }
         free(dep_path);
     }
     
-    files[idx].visited = 2;  /* Done */
-    sorted_files[nsorted++] = files[idx].path;
+    FILE_AT(idx).visited = 2;  /* Done */
+    STACK_PUSH(&sorted_files, char *, FILE_AT(idx).path);
     return 0;
 }
 
 /* Build import graph and return toposorted file list */
 static char **resolve_imports(int nfiles, char **paths, int *out_count) {
-    nfiles_graph = 0;
-    nsorted = 0;
+    files.n = 0;
+    sorted_files.n = 0;
     
     /* Add all input files */
     for (int i = 0; i < nfiles; i++) {
         int idx = find_or_add_file(paths[i]);
-        if (idx < 0) return NULL;
         scan_imports(idx);
     }
     
@@ -275,27 +252,25 @@ static char **resolve_imports(int nfiles, char **paths, int *out_count) {
         if (toposort_visit(idx, paths[i]) < 0) return NULL;
     }
     
-    *out_count = nsorted;
-    return sorted_files;
+    *out_count = (int)sorted_files.n;
+    return (char **)sorted_files.p;
 }
 
 /* Free import graph */
 static void free_import_graph(void) {
-    for (int i = 0; i < nfiles_graph; i++) {
-        free(files[i].path);
-        for (int j = 0; j < files[i].nimports; j++) {
-            free(files[i].imports[j]);
-        }
+    for (size_t i = 0; i < files.n; i++) {
+        free(FILE_AT(i).path);
+        for (size_t j = 0; j < FILE_AT(i).imports.n; j++) free(STACK_AT(&FILE_AT(i).imports, char *, j));
+        stack_drop(&FILE_AT(i).imports);
     }
-    nfiles_graph = 0;
-    nsorted = 0;
+    files.n = 0;
+    sorted_files.n = 0;
 }
 
 /* Concatenate files, stripping import lines */
 static char *concat_files_strip_imports(int nfiles, char **paths) {
     /* Read all files first (handles stdin/pipes) */
     char **contents = rmalloc(nfiles * sizeof(char*));
-    if (!contents) return NULL;
     
     size_t total = 0;
     for (int i = 0; i < nfiles; i++) {
@@ -309,16 +284,12 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
     }
     
     char *buf = rmalloc(total + 1);
-    if (!buf) {
-        for (int i = 0; i < nfiles; i++) free(contents[i]);
-        free(contents);
-        return NULL;
-    }
     
     /* Track file boundaries for error reporting */
-    static const char *boundary_files[256];
-    static unsigned short boundary_starts[256];
-    static unsigned short boundary_import_counts[256];
+    /* one boundary per file (the parse keeps its own copy: set_file_boundaries_ex) */
+    const char **boundary_files = rmalloc((nfiles + 1) * sizeof(char *));
+    unsigned short *boundary_starts = rmalloc((nfiles + 1) * sizeof(unsigned short));
+    unsigned short *boundary_import_counts = rmalloc((nfiles + 1) * sizeof(unsigned short));
     int num_bounds = 0;
     unsigned short current_line = 1;
     
@@ -326,14 +297,11 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
     char *p = buf;
     for (int i = 0; i < nfiles; i++) {
         /* Record boundary start */
-        int bound_idx = -1;
-        if (num_bounds < 256) {
-            bound_idx = num_bounds;
-            boundary_files[num_bounds] = strdup(paths[i]);
-            boundary_starts[num_bounds] = current_line;
-            boundary_import_counts[num_bounds] = 0;
-            num_bounds++;
-        }
+        int bound_idx = num_bounds;
+        boundary_files[num_bounds] = rstrdup(paths[i]);
+        boundary_starts[num_bounds] = current_line;
+        boundary_import_counts[num_bounds] = 0;
+        num_bounds++;
         
         char *line = contents[i];
         while (*line) {
@@ -356,7 +324,7 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
                 current_line++;
             } else {
                 /* Count skipped imports */
-                if (bound_idx >= 0) boundary_import_counts[bound_idx]++;
+                boundary_import_counts[bound_idx]++;
             }
         }
         free(contents[i]);
@@ -368,6 +336,7 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
     
     /* Set file boundaries for error reporting */
     set_file_boundaries_ex(num_bounds, boundary_files, boundary_starts, boundary_import_counts);
+    free(boundary_starts); free(boundary_import_counts); free(boundary_files);   /* the names themselves stay: the parse holds them */
     
     return buf;
 }
@@ -430,18 +399,9 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
         
         /* ELF mode - emit standalone executable */
         if (emit_elf) {
-            /* Allocate code buffer */
-            u32 code_cap = 64 * 1024;
-            u8 *code_buf = rmalloc(code_cap);
-            if (!code_buf) {
-                fprintf(stderr, "resource limit: out of memory\n");
-                free(source);
-                return 1;
-            }
-            
-            /* Initialize and emit runtime with correct output format */
+            /* Initialize and emit runtime with correct output format (the emitter owns its growable code buffer) */
             NativeEmit e;
-            native_emit_init(&e, code_buf, code_cap, emit_mode_to_output_format(mode));
+            native_emit_init(&e, emit_mode_to_output_format(mode));
             e.nf_mode = nf_mode;
             e.io_mode = io_mode;
             native_emit_runtime(&e);
@@ -472,11 +432,11 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
                 free(elf);
             } else {
                 fprintf(stderr, "ELF emission failed\n");
-                free(code_buf); free(source);
+                native_emit_drop(&e); free(source);
                 return 1;
             }
             
-            free(code_buf);
+            native_emit_drop(&e);
             free(source);
             return 0;
         }
@@ -488,69 +448,31 @@ static int compile_files(int nfiles, char **files, AstPool *ap, SKIPool *tp,
             return 1;
         }
         
-        /* Allocate buffer for emission */
-        u64 size_bits;
-        if (mode == EMIT_BCL) {
-            size_bits = bcl_size(ski);
-        } else if (mode == EMIT_XBCL) {
-            size_bits = xbcl_size(ski);
-        } else {
-            size_bits = jot_size(ski);
-        }
-        u32 buf_size = (size_bits + 7) / 8 + 8;  /* +8 for safety */
-        u8 *buf = rmalloc(buf_size);
-        if (!buf) {
-            fprintf(stderr, "resource limit: out of memory\n");
-            free(source);
-            return 1;
-        }
-        memset(buf, 0, buf_size);
-        
-        i32 bits = -1;
-        
+        /* Emit into the growable bit buffer (libeezo/bcl.h), then print it as ASCII */
+        BclBuffer bb;
+        bcl_buffer_init(&bb);
+        bool ok = false;
+        const char *fname = "BCL";
         switch (mode) {
-            case EMIT_BCL: {
-                BclBuffer bb;
-                bcl_buffer_init(&bb, buf, buf_size * 8);
-                if (bcl_emit(ski, &bb)) {
-                    bits = (i32)bcl_buffer_len(&bb);
-                }
-                if (verbose) fprintf(stderr, "BCL (%d bits): ", bits);
-                break;
-            }
-            case EMIT_XBCL: {
-                BclBuffer bb;
-                bcl_buffer_init(&bb, buf, buf_size * 8);
-                if (xbcl_emit(ski, &bb)) {
-                    bits = (i32)bcl_buffer_len(&bb);
-                }
-                if (verbose) fprintf(stderr, "XBCL (%d bits): ", bits);
-                break;
-            }
-            case EMIT_JOT:
-                bits = jot_emit(ski, buf, buf_size);
-                if (verbose) fprintf(stderr, "Jot (%d bits): ", bits);
-                break;
-            case EMIT_JOMPLEMENT:
-                bits = jomplement_emit(ski, buf, buf_size);
-                if (verbose) fprintf(stderr, "Jomplement (%d bits): ", bits);
-                break;
+            case EMIT_BCL: ok = bcl_emit(ski, &bb); fname = "BCL"; break;
+            case EMIT_XBCL: ok = xbcl_emit(ski, &bb); fname = "XBCL"; break;
+            case EMIT_JOT: ok = jot_emit(ski, &bb); fname = "Jot"; break;
+            case EMIT_JOMPLEMENT: ok = jomplement_emit(ski, &bb); fname = "Jomplement"; break;
         }
+        u64 bits = bcl_buffer_len(&bb);
+        if (verbose) fprintf(stderr, "%s (%lld bits): ", fname, ok ? (long long)bits : -1LL);
         
-        if (bits > 0) {
-            for (int b = 0; b < bits; b++) {
-                int byte_idx = b / 8;
-                int bit_idx = 7 - (b % 8);
-                printf("%d", (buf[byte_idx] >> bit_idx) & 1);
-            }
+        if (ok && bits > 0) {
+            const u8 *buf = bcl_buffer_data(&bb);
+            for (u64 b = 0; b < bits; b++) putchar('0' + ((buf[b / 8] >> (7 - b % 8)) & 1));
             printf("\n");
         } else {
             fprintf(stderr, "Emission failed\n");
-            free(buf); free(source);
+            bcl_buffer_drop(&bb); free(source);
             return 1;
         }
         
-        free(buf);
+        bcl_buffer_drop(&bb);
     } else {
         fprintf(stderr, "Compilation failed\n");
         free(source);
@@ -581,11 +503,12 @@ static void usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
+    mem_init("eezoc", "EEZOC_MAX_ALLOC");   /* the one memory layer (libeezo/mem.h): its failure path and budget */
     SKIPool tp;
-    pool_init(&tp, 1000000);
+    ski_pool_init(&tp);
     
     AstPool ap;
-    ast_pool_init(&ap, 8000000);
+    ast_pool_init(&ap);
     
     int verbose = 0;
     EmitMode mode = EMIT_BCL;
@@ -662,6 +585,6 @@ int main(int argc, char **argv) {
     int rc = compile_files(1, &stdin_path, &ap, &tp, verbose, mode, emit_elf, nf_mode, heap_size, io_mode);
     
     ast_pool_free(&ap);
-    pool_free(&tp);
+    ski_pool_drop(&tp);
     return rc;
 }
