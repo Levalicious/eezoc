@@ -81,9 +81,10 @@ static Symbol lookup_debruijn(BindCtx *bindings, long long index) {
 }
 
 /*
- * Convert LZ VARIABLE to our Ast
+ * Convert LZ VARIABLE to our Ast: every case but a global met for the first time (convert_term_ctx converts that
+ * global's definition first, then comes here). A bad global index is NULL.
  */
-static Ast *convert_variable(ConvCtx *ctx, Term *term) {
+static Ast *convert_variable(ConvCtx *ctx, Term *term, BindCtx *bindings) {
     Tag tag = getTag(term);
     Lexeme lex = getLexeme(tag);
     long long debruijn = getValue(term);
@@ -92,16 +93,6 @@ static Ast *convert_variable(ConvCtx *ctx, Term *term) {
     if (debruijn < 0) {
         size_t gi = (size_t)(-debruijn - 1);
         if (gi >= ctx->nglobals) { fprintf(stderr, "Error: global index %zu out of range\n", gi); return NULL; }
-        if (!ctx->gast[gi]) {
-            Symbol name = tag_to_symbol(tag);
-            char *s = rmalloc(name.len + 2); s[0] = '$'; memcpy(s + 1, name.str, name.len); s[name.len + 1] = 0;
-            ctx->gname[gi] = (Symbol){ s, name.len + 1 };
-            BindCtx *saved = ctx->bindings; ctx->bindings = NULL;   /* a definition is a closed term over the earlier globals */
-            Ast *v = convert_term_ctx(ctx, getGlobalReferent(term, ctx->globals));
-            ctx->bindings = saved;
-            if (!v) return NULL;
-            ctx->gast[gi] = v;
-        }
         return ast_var(ctx->pool, tag_to_loc(tag), ctx->gname[gi]);
     }
     
@@ -114,7 +105,7 @@ static Ast *convert_variable(ConvCtx *ctx, Term *term) {
     
     /* For bound variables, look up name in context */
     if (debruijn > 0) {
-        Symbol name = lookup_debruijn(ctx->bindings, debruijn);
+        Symbol name = lookup_debruijn(bindings, debruijn);
         if (name.str) {
             return ast_var(ctx->pool, tag_to_loc(tag), name);
         }
@@ -125,48 +116,6 @@ static Ast *convert_variable(ConvCtx *ctx, Term *term) {
     
     /* Unbound variable - use name */
     return ast_var(ctx->pool, tag_to_loc(tag), tag_to_symbol(tag));
-}
-
-/*
- * Convert LZ ABSTRACTION to our Ast
- */
-static Ast *convert_abstraction(ConvCtx *ctx, Term *term) {
-    Tag tag = getTag(term);
-    Term *body = getRight(term);
-    
-    /* LZ uses (parameter, body) layout */
-    /* Parameter tag gives the name */
-    Term *param = getLeft(term);
-    Symbol param_sym = tag_to_symbol(getTag(param));
-    
-    /* Extend context with new binding */
-    BindCtx new_binding = { .name = param_sym, .next = ctx->bindings };
-    BindCtx *old_bindings = ctx->bindings;
-    ctx->bindings = &new_binding;
-    
-    Ast *body_ast = convert_term_ctx(ctx, body);
-    
-    ctx->bindings = old_bindings;
-    
-    if (!body_ast) return NULL;
-    
-    return ast_abs(ctx->pool, tag_to_loc(tag), param_sym, body_ast);
-}
-
-/*
- * Convert LZ APPLICATION to our Ast
- */
-static Ast *convert_application(ConvCtx *ctx, Term *term) {
-    Tag tag = getTag(term);
-    Term *func = getLeft(term);
-    Term *arg = getRight(term);
-    
-    Ast *func_ast = convert_term_ctx(ctx, func);
-    Ast *arg_ast = convert_term_ctx(ctx, arg);
-    
-    if (!func_ast || !arg_ast) return NULL;
-    
-    return ast_app(ctx->pool, tag_to_loc(tag), func_ast, arg_ast);
 }
 
 /*
@@ -192,26 +141,72 @@ static Ast *convert_operation(ConvCtx *ctx, Term *term) {
 }
 
 /*
- * Main term converter with context
+ * Main term converter with context: an explicit machine on a heap stack, not C recursion (a term's depth, and the
+ * chain of first references from one global's definition to the next, are bounded by memory alone). Each frame
+ * carries its own binding context; an abstraction's new binding lives in the conversion's arena. A failed subterm is
+ * NULL, which its enclosing terms pass on (both sides of an application are still converted, as before).
  */
-static Ast *convert_term_ctx(ConvCtx *ctx, Term *term) {
-    if (!term) return NULL;
-    
-    switch (getTermType(term)) {
-    case VARIABLE:
-        return convert_variable(ctx, term);
-    case ABSTRACTION:
-        return convert_abstraction(ctx, term);
-    case APPLICATION:
-        return convert_application(ctx, term);
-    case NUMERAL:
-        return convert_numeral(ctx, term);
-    case OPERATION:
-        return convert_operation(ctx, term);
-    default:
-        fprintf(stderr, "Error: unknown term type %d\n", getTermType(term));
-        return NULL;
+typedef struct { Term *t; BindCtx *b; int st; Ast *l; size_t gi; } CvFrame;
+static Ast *convert_term_ctx(ConvCtx *ctx, Term *root) {
+    Stack st = STACK_INIT(CvFrame); Arena binds = { 0 };
+    Ast *ret = NULL; int have = 0;
+    CvFrame f0 = { root, ctx->bindings, 0, NULL, 0 }; STACK_PUSH(&st, CvFrame, f0);
+    while (st.n) {
+        CvFrame *f = &STACK_TOP(&st, CvFrame);
+        Term *term = f->t;
+        if (!have) {
+            if (!term) { ret = NULL; st.n--; have = 1; continue; }
+            switch (getTermType(term)) {
+            case VARIABLE: {
+                long long debruijn = getValue(term);
+                if (debruijn < 0) {
+                    size_t gi = (size_t)(-debruijn - 1);
+                    if (gi < ctx->nglobals && !ctx->gast[gi]) {   /* first reference: the definition, a closed term over the earlier globals */
+                        Symbol name = tag_to_symbol(getTag(term));
+                        char *s = rmalloc(name.len + 2); s[0] = '$'; memcpy(s + 1, name.str, name.len); s[name.len + 1] = 0;
+                        ctx->gname[gi] = (Symbol){ s, name.len + 1 };
+                        f->st = 1; f->gi = gi;
+                        CvFrame c = { getGlobalReferent(term, ctx->globals), NULL, 0, NULL, 0 }; STACK_PUSH(&st, CvFrame, c);
+                        continue;
+                    }
+                }
+                ret = convert_variable(ctx, term, f->b); st.n--; have = 1; continue;
+            }
+            case ABSTRACTION: {
+                BindCtx *nb = arena_alloc(&binds, sizeof *nb);
+                nb->name = tag_to_symbol(getTag(getLeft(term))); nb->next = f->b;   /* LZ uses (parameter, body) layout */
+                CvFrame c = { getRight(term), nb, 0, NULL, 0 }; STACK_PUSH(&st, CvFrame, c);
+                continue;
+            }
+            case APPLICATION: {
+                CvFrame c = { f->st == 0 ? getLeft(term) : getRight(term), f->b, 0, NULL, 0 }; STACK_PUSH(&st, CvFrame, c);
+                continue;
+            }
+            case NUMERAL: ret = convert_numeral(ctx, term); st.n--; have = 1; continue;
+            case OPERATION: ret = convert_operation(ctx, term); st.n--; have = 1; continue;
+            default:
+                fprintf(stderr, "Error: unknown term type %d\n", getTermType(term));
+                ret = NULL; st.n--; have = 1; continue;
+            }
+        }
+        have = 0;
+        switch (getTermType(term)) {
+        case VARIABLE:   /* the global's definition is converted: the reference is its let-bound name */
+            if (ret) { ctx->gast[f->gi] = ret; ret = ast_var(ctx->pool, tag_to_loc(getTag(term)), ctx->gname[f->gi]); }
+            st.n--; have = 1; break;
+        case ABSTRACTION: {
+            Symbol param_sym = tag_to_symbol(getTag(getLeft(term)));
+            ret = ret ? ast_abs(ctx->pool, tag_to_loc(getTag(term)), param_sym, ret) : NULL;
+            st.n--; have = 1; break;
+        }
+        default:   /* an application: its function, then its argument */
+            if (f->st == 0) { f->l = ret; f->st = 1; break; }
+            ret = f->l && ret ? ast_app(ctx->pool, tag_to_loc(getTag(term)), f->l, ret) : NULL;
+            st.n--; have = 1; break;
+        }
     }
+    stack_drop(&st); arena_drop(&binds);
+    return ret;
 }
 
 /*

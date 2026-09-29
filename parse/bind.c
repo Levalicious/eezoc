@@ -1,3 +1,4 @@
+#include <libeezo/mem.h>
 #include "tree.h"
 #include "array.h"
 #include "ast.h"
@@ -45,44 +46,65 @@ static void bindReference(Node* node, Array* parameters, size_t globalDepth) {
     setValue(node, debruijn);
 }
 
-static void bindWith(Node* node, Array* parameters, const Array* globals) {
-    switch (getASTType(node)) {
-        case REFERENCE:
-            bindReference(node, parameters, length(globals)); break;
-        case ARROW:
-            append(parameters, getParameter(node));
-            bindWith(getBody(node), parameters, globals);
-            unappend(parameters);
-            setTag(node, getTag(getParameter(node)));
-            setType(node, ABSTRACTION);
-            if (INLINE && isGlobal(getBody(node)))
-                setBody(node, getGlobalReferent(getBody(node), globals));
-            break;
-        case JUXTAPOSITION:
-        case LET:
-            bindWith(getLeft(node), parameters, globals);
-            bindWith(getRight(node), parameters, globals);
-            setType(node, APPLICATION);
-            if (INLINE && isGlobal(getLeft(node)))
-                setLeft(node, getGlobalReferent(getLeft(node), globals));
-            if (INLINE && isGlobal(getRight(node)))
-                setRight(node, getGlobalReferent(getRight(node), globals));
-            break;
-        case NUMBER:
-            setType(node, NUMERAL); break;
-        case DEFINITION:
-            syntaxErrorNode("missing scope for definition", node); break;
-        case ASPATTERN:
-            syntaxErrorNode("as pattern not in valid location", node); break;
-        case COMMAPAIR:
-            syntaxErrorNode("comma not inside brackets", node); break;
-        case COLONPAIR:
-            syntaxErrorNode("colon not in valid location", node); break;
-        case SETBUILDER:
-            syntaxErrorNode("bracket not in valid location", node); break;
-        case OPERATOR:
-            assert(false); break;
+/* Binding: a depth-first walk with frames on a heap stack, not C recursion. An arrow's parameter is in scope for its
+   body (appended before, removed after); an application's sides are bound left then right; each node takes its bound
+   form after its children, as before. */
+typedef struct { Node* node; int st; } BindFrame;
+static void bindWith(Node* root, Array* parameters, const Array* globals) {
+    Stack frames = STACK_INIT(BindFrame);
+    BindFrame f0 = { root, 0 }; STACK_PUSH(&frames, BindFrame, f0);
+    while (frames.n) {
+        BindFrame* f = &STACK_TOP(&frames, BindFrame);
+        Node* node = f->node;
+        switch (getASTType(node)) {
+            case REFERENCE:
+                bindReference(node, parameters, length(globals)); frames.n--; break;
+            case ARROW:
+                if (f->st == 0) {
+                    append(parameters, getParameter(node));
+                    f->st = 1;
+                    BindFrame c = { getBody(node), 0 }; STACK_PUSH(&frames, BindFrame, c);
+                    break;
+                }
+                unappend(parameters);
+                setTag(node, getTag(getParameter(node)));
+                setType(node, ABSTRACTION);
+                if (INLINE && isGlobal(getBody(node)))
+                    setBody(node, getGlobalReferent(getBody(node), globals));
+                frames.n--; break;
+            case JUXTAPOSITION:
+            case LET:
+                if (f->st < 2) {
+                    Node* side = f->st == 0 ? getLeft(node) : getRight(node);
+                    f->st += 1;
+                    BindFrame c = { side, 0 }; STACK_PUSH(&frames, BindFrame, c);
+                    break;
+                }
+                setType(node, APPLICATION);
+                if (INLINE && isGlobal(getLeft(node)))
+                    setLeft(node, getGlobalReferent(getLeft(node), globals));
+                if (INLINE && isGlobal(getRight(node)))
+                    setRight(node, getGlobalReferent(getRight(node), globals));
+                frames.n--; break;
+            case NUMBER:
+                setType(node, NUMERAL); frames.n--; break;
+            case DEFINITION:
+                syntaxErrorNode("missing scope for definition", node); frames.n--; break;
+            case ASPATTERN:
+                syntaxErrorNode("as pattern not in valid location", node); frames.n--; break;
+            case COMMAPAIR:
+                syntaxErrorNode("comma not inside brackets", node); frames.n--; break;
+            case COLONPAIR:
+                syntaxErrorNode("colon not in valid location", node); frames.n--; break;
+            case SETBUILDER:
+                syntaxErrorNode("bracket not in valid location", node); frames.n--; break;
+            case OPERATOR:
+                assert(false); frames.n--; break;
+            default:
+                frames.n--; break;
+        }
     }
+    stack_drop(&frames);
 }
 
 Array* bind(Hold* root) {

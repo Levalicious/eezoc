@@ -115,62 +115,49 @@ static void print_symbol(Symbol s) {
     printf("%.*s", s.len, s.str);
 }
 
-void ast_print(Ast *a) {
-    if (!a) {
-        printf("NULL");
-        return;
-    }
-    
-    switch (a->tag) {
-    case AST_VAR:
-        print_symbol(a->var.name);
-        if (a->var.debruijn >= 0) {
-            printf("[%d]", a->var.debruijn);
+/* the pieces still to print - a term, or a string - on a heap stack in output order, not C recursion */
+typedef struct { Ast *a; const char *s; } APiece;
+void ast_print(Ast *root) {
+    Stack st = STACK_INIT(APiece);
+    APiece p0 = { root, NULL }; STACK_PUSH(&st, APiece, p0);
+#define APS(str) do { APiece p_ = { NULL, (str) }; STACK_PUSH(&st, APiece, p_); } while (0)
+#define APT(t) do { APiece p_ = { (t), NULL }; STACK_PUSH(&st, APiece, p_); } while (0)
+    while (st.n) {
+        APiece pc = STACK_POP(&st, APiece);
+        if (pc.s) { printf("%s", pc.s); continue; }
+        Ast *a = pc.a;
+        if (!a) { printf("NULL"); continue; }
+        switch (a->tag) {
+        case AST_VAR:
+            print_symbol(a->var.name);
+            if (a->var.debruijn >= 0) printf("[%d]", a->var.debruijn);
+            break;
+        case AST_ABS:   /* (λp. body) */
+            printf("(λ"); print_symbol(a->abs.param); printf(". ");
+            APS(")"); APT(a->abs.body);
+            break;
+        case AST_APP:   /* (f x) */
+            printf("(");
+            APS(")"); APT(a->app.arg); APS(" "); APT(a->app.func);
+            break;
+        case AST_LET:   /* (let n = v in b) */
+            printf("(let "); print_symbol(a->let.name); printf(" = ");
+            APS(")"); APT(a->let.body); APS(" in "); APT(a->let.value);
+            break;
+        case AST_NUM: printf("%lld", (long long)a->num); break;
+        case AST_STR: printf("\"%.*s\"", a->str.len, a->str.data); break;
+        case AST_S: printf("S"); break;
+        case AST_K: printf("K"); break;
+        case AST_I: printf("I"); break;
+        case AST_B: printf("B"); break;
+        case AST_C: printf("C"); break;
+        case AST_T: printf("T"); break;
+        case AST_R: printf("R"); break;
+        case AST_WORD: printf("%lluw", (unsigned long long)a->word); break;
+        case AST_PRIM: printf("w%s", prim_name(a->op)); break;
         }
-        break;
-    case AST_ABS:
-        printf("(λ");
-        print_symbol(a->abs.param);
-        printf(". ");
-        ast_print(a->abs.body);
-        printf(")");
-        break;
-    case AST_APP:
-        printf("(");
-        ast_print(a->app.func);
-        printf(" ");
-        ast_print(a->app.arg);
-        printf(")");
-        break;
-    case AST_LET:
-        printf("(let ");
-        print_symbol(a->let.name);
-        printf(" = ");
-        ast_print(a->let.value);
-        printf(" in ");
-        ast_print(a->let.body);
-        printf(")");
-        break;
-    case AST_NUM:
-        printf("%lld", (long long)a->num);
-        break;
-    case AST_STR:
-        printf("\"%.*s\"", a->str.len, a->str.data);
-        break;
-    case AST_S:
-        printf("S");
-        break;
-    case AST_K:
-        printf("K");
-        break;
-    case AST_I:
-        printf("I");
-        break;
-    case AST_B: printf("B"); break;
-    case AST_C: printf("C"); break;
-    case AST_T: printf("T"); break;
-    case AST_R: printf("R"); break;
-    case AST_WORD: printf("%lluw", (unsigned long long)a->word); break;
-    case AST_PRIM: printf("w%s", prim_name(a->op)); break;
     }
+#undef APS
+#undef APT
+    stack_drop(&st);
 }

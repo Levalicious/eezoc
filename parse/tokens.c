@@ -78,12 +78,20 @@ static Node* parseCharacterLiteral(Lexeme lexeme) {
     return Number(tag, n);
 }
 
+/* the literal's characters, then the list from its end (a loop: a long literal is not a deep recursion) */
 static Node* buildStringLiteral(Tag tag, const char* start) {
-    char c = start[0];
-    syntaxErrorIf(c == '\n' || c == '\0', "missing end quote for", tag);
-    return c == getLexeme(tag).start[0] ? Nil(tag) :
-        prepend(tag, Number(tag, decodeCharacter(start, tag)),
-        buildStringLiteral(tag, skipQuoteCharacter(start)));
+    Stack chars = STACK_INIT(long long);
+    for (;;) {
+        char c = start[0];
+        syntaxErrorIf(c == '\n' || c == '\0', "missing end quote for", tag);
+        if (c == getLexeme(tag).start[0]) break;
+        STACK_PUSH(&chars, long long, (long long)decodeCharacter(start, tag));
+        start = skipQuoteCharacter(start);
+    }
+    Node* list = Nil(tag);
+    while (chars.n) list = prepend(tag, Number(tag, STACK_POP(&chars, long long)), list);
+    stack_drop(&chars);
+    return list;
 }
 
 static Node* parseStringLiteral(Lexeme lexeme) {

@@ -1,3 +1,4 @@
+#include <libeezo/mem.h>
 #include <assert.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -61,23 +62,25 @@ Node* newPointerLeaf(Tag tag, char type, char variety, void* data) {
         .tag=(Tag)reference((Node*)tag), .data={.pointer=data}});
 }
 
+/* a node whose last reference goes releases its tag and children in turn: a worklist on a heap stack, not C
+   recursion (it had "partial tail recursion to reduce stack segfaults") */
+static Stack releaseStack = { NULL, 0, 0, sizeof(Node*) };
 static void releaseNode(Node* node) {
-    if (node == NULL)
-        return;
-    assert(node->referenceCount > 0);
-    node->referenceCount -= 1;
-    if (node->referenceCount > 0)
-        return;
-    if (node->tag != NULL)
-        releaseNode((Node*)(node->tag));
-    // conserve stack with partial tail recursion to reduce stack segfaults
-    Node* left = node->flags & GC_LEFT ? node->data.branches.left : NULL;
-    Node* right = node->flags & GC_RIGHT ? node->data.branches.right : NULL;
-    reclaim(node);
-    if (left != NULL)
-        releaseNode(left);
-    if (right != NULL)
-        releaseNode(right);
+    size_t base = releaseStack.n;
+    if (node != NULL) STACK_PUSH(&releaseStack, Node*, node);
+    while (releaseStack.n > base) {
+        node = STACK_POP(&releaseStack, Node*);
+        assert(node->referenceCount > 0);
+        node->referenceCount -= 1;
+        if (node->referenceCount > 0)
+            continue;
+        Node* left = node->flags & GC_LEFT ? node->data.branches.left : NULL;
+        Node* right = node->flags & GC_RIGHT ? node->data.branches.right : NULL;
+        if (node->tag != NULL) STACK_PUSH(&releaseStack, Node*, (Node*)(node->tag));
+        reclaim(node);
+        if (left != NULL) STACK_PUSH(&releaseStack, Node*, left);
+        if (right != NULL) STACK_PUSH(&releaseStack, Node*, right);
+    }
 }
 
 void setLeft(Node* node, Node* left) {
@@ -119,7 +122,7 @@ Tag newTag(Lexeme lexeme, char fixity) {
 }
 
 Tag newLiteralTag(const char* name, Location location, char fixity) {
-    Lexeme lexeme = newLexeme(name, (unsigned short)strlen(name), location);
+    Lexeme lexeme = newLexeme(name, (unsigned int)strlen(name), location);
     return newTag(lexeme, fixity);
 }
 
