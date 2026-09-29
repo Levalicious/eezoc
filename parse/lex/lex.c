@@ -72,25 +72,25 @@ static Location advance(Lexeme lexeme) {
         const char* filename = skipRepeatable(&(lexeme.start[2]), ' ');
         if (isLineFeed(filename[0]) || filename[0] == '\0')
             return newLocation(0, 0, 0);
-        unsigned short file = newFilename(filename);
+        unsigned int file = newFilename(filename);
         lexErrorIf(file == 0, "too many files", lexeme.location);
         return newLocation(file, 1, 0);
     }
     Location loc = lexeme.location;
     if (isLineFeed(lexeme.start[0])) {
-        lexErrorIf(loc.line >= MAX_LINE, "too many lines in file", loc);
+        lexErrorIf(loc.line >= MAX_LINE, "too many lines in file", loc);   /* the 32-bit field's width */
         return newLocation(loc.file, loc.line + 1, lexeme.length);
     }
     unsigned long column = (unsigned long)(loc.column + lexeme.length);
     lexErrorIf(column > MAX_COLUMN, "column too wide", loc);
-    return newLocation(loc.file, loc.line, (unsigned short)column);
+    return newLocation(loc.file, loc.line, (unsigned int)column);
 }
 
 static Lexeme getNextLexeme(Lexeme lexeme) {
     const char* start = lexeme.start + lexeme.length;
     long length = start[0] == '\0' ? 1 : skipLexeme(start) - start;
     lexErrorIf(length > MAX_LEXEME_LENGTH, "lexeme too long", lexeme.location);
-    return newLexeme(start, (unsigned short)length, advance(lexeme));
+    return newLexeme(start, (unsigned int)length, advance(lexeme));
 }
 
 Token lex(Token token) {

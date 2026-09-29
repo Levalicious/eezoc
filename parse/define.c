@@ -1,3 +1,4 @@
+#include <libeezo/mem.h>
 #include "tree.h"
 #include "opp/operator.h"
 #include "ast.h"
@@ -70,23 +71,30 @@ static Node* newMainCall(Node* name) {
     return Juxtaposition(tag, print, Juxtaposition(tag, name, input));
 }
 
-static bool containsFreeName(Node* node, Node* name) {
-    switch (getASTType(node)) {
-        case REFERENCE:
-            return getValue(node) == 0 && isSameTag(getTag(node), getTag(name));
-        case ARROW:
-            return !isSameTag(getTag(getLeft(node)), getTag(name))
-                && containsFreeName(getRight(node), name);
-        case LET:
-        case JUXTAPOSITION:
-            return containsFreeName(getLeft(node), name)
-                || containsFreeName(getRight(node), name);
-        case NUMBER:
-            return false;
-        default:
-            assert(false);
-            return false;
+static bool containsFreeName(Node* root, Node* name) {
+    /* a walk on a heap stack, not C recursion: an arrow binding the name hides its body */
+    Stack st = STACK_INIT(Node*);
+    STACK_PUSH(&st, Node*, root);
+    bool found = false;
+    while (!found && st.n) {
+        Node* node = STACK_POP(&st, Node*);
+        switch (getASTType(node)) {
+            case REFERENCE:
+                found = getValue(node) == 0 && isSameTag(getTag(node), getTag(name)); break;
+            case ARROW:
+                if (!isSameTag(getTag(getLeft(node)), getTag(name))) STACK_PUSH(&st, Node*, getRight(node));
+                break;
+            case LET:
+            case JUXTAPOSITION:
+                STACK_PUSH(&st, Node*, getRight(node)); STACK_PUSH(&st, Node*, getLeft(node)); break;
+            case NUMBER:
+                break;
+            default:
+                assert(false); break;
+        }
     }
+    stack_drop(&st);
+    return found;
 }
 
 static Node* transformRecursion(Node* name, Node* value) {

@@ -1,12 +1,22 @@
+#include <libeezo/mem.h>
 #include "tree.h"
 #include "ast.h"
 #include "patterns.h"
 
-bool isValidPattern(Node* node) {
-    return isName(node) ||
-        (isColonPair(node) && isValidPattern(getLeft(node))) ||
-        (isJuxtaposition(node) &&
-        isValidPattern(getLeft(node)) && isValidPattern(getRight(node)));
+/* every node a name, a colon pair over a valid pattern, or an application of valid patterns: a walk on a heap stack */
+bool isValidPattern(Node* root) {
+    Stack st = STACK_INIT(Node*);
+    STACK_PUSH(&st, Node*, root);
+    bool ok = true;
+    while (ok && st.n) {
+        Node* node = STACK_POP(&st, Node*);
+        if (isName(node)) continue;
+        if (isColonPair(node)) { STACK_PUSH(&st, Node*, getLeft(node)); continue; }
+        if (isJuxtaposition(node)) { STACK_PUSH(&st, Node*, getRight(node)); STACK_PUSH(&st, Node*, getLeft(node)); continue; }
+        ok = false;
+    }
+    stack_drop(&st);
+    return ok;
 }
 
 unsigned int getArgumentCount(Node* application) {
@@ -23,28 +33,49 @@ static Node* newProjector(Tag tag, unsigned int size, unsigned int index) {
     return projector;
 }
 
+/* A pattern's arrow, by the rules below - an explicit machine, not C recursion: an as-pattern waits for its inner
+   arrow, an application's parameters are wrapped one at a time from the right, each in a frame. */
+enum { NA_AS, NA_JUX };
+typedef struct { int kind; Node* left; Node* node; } ArrowFrame;
 Node* newArrow(Node* left, Node* right) {
-    if (isColonPair(left))
-        return newArrow(getLeft(left), right);
-    if (isName(left))
-        return SingleArrow(left, right);
-
-    // example: p@(x, y) -> body  ~>  p -> (((x, y) -> body) p)
-    if (isAsPattern(left))
-        return newArrow(getLeft(left), Juxtaposition(getTag(left),
-            newArrow(getRight(left), right), Underscore(getTag(left), 1)));
-
-    // example: (x, y) -> body  ~>  _ -> (x -> y -> body) first(_) second(_)
-    syntaxErrorNodeIf(!isJuxtaposition(left), "invalid parameter", left);
-    Node* node = left;
-    Node* body = right;
-    for (; isJuxtaposition(node); node = getLeft(node))
-        body = newArrow(getRight(node), body);
-    Tag tag = getTag(node);
-    for (unsigned int i = 0, size = getArgumentCount(left); i < size; ++i)
-        body = Juxtaposition(tag, body, Juxtaposition(tag,
-            Underscore(tag, 1), newProjector(tag, size, i)));
-    return UnderscoreArrow(tag, body);
+    Stack frames = STACK_INIT(ArrowFrame);
+    Node* ret;
+call:
+    for (;;) {
+        if (isColonPair(left)) { left = getLeft(left); continue; }
+        if (isName(left)) { ret = SingleArrow(left, right); break; }
+        // example: p@(x, y) -> body  ~>  p -> (((x, y) -> body) p)
+        if (isAsPattern(left)) {
+            ArrowFrame f = { NA_AS, left, NULL }; STACK_PUSH(&frames, ArrowFrame, f);
+            left = getRight(left); continue;
+        }
+        // example: (x, y) -> body  ~>  _ -> (x -> y -> body) first(_) second(_)
+        syntaxErrorNodeIf(!isJuxtaposition(left), "invalid parameter", left);
+        ArrowFrame f = { NA_JUX, left, left }; STACK_PUSH(&frames, ArrowFrame, f);
+        left = getRight(left); continue;
+    }
+    while (frames.n) {
+        ArrowFrame f = STACK_POP(&frames, ArrowFrame);
+        if (f.kind == NA_AS) {
+            right = Juxtaposition(getTag(f.left), ret, Underscore(getTag(f.left), 1));
+            left = getLeft(f.left);
+            goto call;
+        }
+        Node* node = getLeft(f.node);   /* the next parameter, leftwards, around the body so far */
+        if (isJuxtaposition(node)) {
+            f.node = node; STACK_PUSH(&frames, ArrowFrame, f);
+            left = getRight(node); right = ret;
+            goto call;
+        }
+        Tag tag = getTag(node);
+        Node* body = ret;
+        for (unsigned int i = 0, size = getArgumentCount(f.left); i < size; ++i)
+            body = Juxtaposition(tag, body, Juxtaposition(tag,
+                Underscore(tag, 1), newProjector(tag, size, i)));
+        ret = UnderscoreArrow(tag, body);
+    }
+    stack_drop(&frames);
+    return ret;
 }
 
 Node* newCase(Node* left, Node* right) {
@@ -74,15 +105,20 @@ static Node* attachDefaultCase(Tag tag, Node* caseArrow, Node* fallback) {
     return DefaultCaseArrow(this, body);
 }
 
+/* base applied to the extension's arguments, left to right: its left spine folded from the bottom (a loop) */
 static Node* combineCaseBodies(Tag tag, Node* base, Node* extension) {
-    if (!isJuxtaposition(extension))
-        return base;
-    Node* merged = combineCaseBodies(tag, base, getLeft(extension));
-    return Juxtaposition(tag, merged, getRight(extension));
+    Stack rights = STACK_INIT(Node*);
+    for (; isJuxtaposition(extension); extension = getLeft(extension)) STACK_PUSH(&rights, Node*, getRight(extension));
+    Node* merged = base;
+    while (rights.n) merged = Juxtaposition(tag, merged, STACK_POP(&rights, Node*));
+    stack_drop(&rights);
+    return merged;
 }
 
 static int getCaseCount(Node* body) {
-    return isJuxtaposition(body) ? getCaseCount(getLeft(body)) + 1 : 0;
+    int n = 0;
+    for (; isJuxtaposition(body); body = getLeft(body)) n++;
+    return n;
 }
 
 Node* combineCases(Tag tag, Node* left, Node* right) {

@@ -128,7 +128,7 @@ static inline Node* UnderscoreArrow(Tag tag, Node* body) {
 }
 
 static inline bool isTuple(Node* node) {
-    // a tuple is a spine of applications headed by a name starting with comma
-    return isJuxtaposition(node) ? isTuple(getLeft(node)) :
-        (isName(node) && getLexeme(getTag(node)).start[0] == ',');
+    // a tuple is a spine of applications headed by a name starting with comma (the spine walked by a loop)
+    while (isJuxtaposition(node)) node = getLeft(node);
+    return isName(node) && getLexeme(getTag(node)).start[0] == ',';
 }

@@ -43,44 +43,52 @@ static int env_lookup(Env *env, Symbol name) {
     return -1;  /* Not found */
 }
 
-static bool resolve_rec(Ast *ast, Env *env) {
-    switch (ast->tag) {
-    case AST_VAR: {
-        int idx = env_lookup(env, ast->var.name);
-        if (idx < 0) {
-            fprintf(stderr, "Error: undefined variable '%.*s' at line %u\n",
-                    ast->var.name.len, ast->var.name.str, ast->loc.line);
-            return false;
+/* A depth-first walk on a heap stack, not C recursion (the term's depth is bounded by memory alone): each pending
+   subterm with its environment, left to right; the environments' nodes live in the walk's arena. The first unbound
+   variable ends it. */
+typedef struct { Ast *ast; Env *env; } RTask;
+static bool resolve_rec(Ast *root, Env *env0) {
+    Stack st = STACK_INIT(RTask); Arena envs = { 0 };
+    RTask t0 = { root, env0 }; STACK_PUSH(&st, RTask, t0);
+    bool ok = true;
+    while (ok && st.n) {
+        RTask t = STACK_POP(&st, RTask);
+        Ast *ast = t.ast;
+        switch (ast->tag) {
+        case AST_VAR: {
+            int idx = env_lookup(t.env, ast->var.name);
+            if (idx < 0) {
+                fprintf(stderr, "Error: undefined variable '%.*s' at line %u\n",
+                        ast->var.name.len, ast->var.name.str, ast->loc.line);
+                ok = false; break;
+            }
+            ast->var.debruijn = idx;
+            break;
         }
-        ast->var.debruijn = idx;
-        return true;
+        case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R:
+        case AST_WORD: case AST_PRIM: case AST_NUM: case AST_STR:
+            break;
+        case AST_APP: {
+            RTask r = { ast->app.arg, t.env }, l = { ast->app.func, t.env };
+            STACK_PUSH(&st, RTask, r); STACK_PUSH(&st, RTask, l);
+            break;
+        }
+        case AST_ABS: {
+            Env *ne = arena_alloc(&envs, sizeof *ne); ne->name = ast->abs.param; ne->next = t.env;
+            RTask b = { ast->abs.body, ne }; STACK_PUSH(&st, RTask, b);
+            break;
+        }
+        case AST_LET: {   /* let x = v in e: v in the current environment, then e with x bound */
+            Env *ne = arena_alloc(&envs, sizeof *ne); ne->name = ast->let.name; ne->next = t.env;
+            RTask b = { ast->let.body, ne }, v = { ast->let.value, t.env };
+            STACK_PUSH(&st, RTask, b); STACK_PUSH(&st, RTask, v);
+            break;
+        }
+        default: ok = false; break;
+        }
     }
-    case AST_S:
-    case AST_K:
-    case AST_I:
-    case AST_B:
-    case AST_C:
-    case AST_T:
-    case AST_R:
-    case AST_WORD:
-    case AST_PRIM:
-    case AST_NUM:
-    case AST_STR:
-        return true;
-    case AST_APP:
-        return resolve_rec(ast->app.func, env) && resolve_rec(ast->app.arg, env);
-    case AST_ABS: {
-        Env new_env = { ast->abs.param, env };
-        return resolve_rec(ast->abs.body, &new_env);
-    }
-    case AST_LET: {
-        /* let x = v in e  =>  resolve v in current env, resolve e with x bound */
-        if (!resolve_rec(ast->let.value, env)) return false;
-        Env new_env = { ast->let.name, env };
-        return resolve_rec(ast->let.body, &new_env);
-    }
-    }
-    return false;
+    stack_drop(&st); arena_drop(&envs);
+    return ok;
 }
 
 bool bracket_resolve(Ast *ast) {
@@ -108,31 +116,53 @@ static int kt_is_var0(KT t) { return t.n == 1 && t.g[0] && t.d->tag == AST_I; } 
 static Ast *kapp_ast(AstPool *p, Ast *f, Ast *a) { return ast_app(p, noloc, f, a); }
 static Ast *kcomb(AstPool *p, AstTag tag) { Ast *a = ast_s(p, noloc); a->tag = tag; return a; }
 
-static Ast *kapp(AstPool *p, KT t1, KT t2);
-/* the rules of #: how the innermost variable is used on each side decides the combinator */
+/* the rules of #: how the innermost variable is used on each side decides the combinator. The recursion runs as deep
+   as the binders nest, so it is a loop: a rule that needs an inner combination first (S, C, B with the left side
+   open) pushes the outer one - its bits and its right side - and continues with the inner; a result completes the
+   innermost pending outer combination, or is the answer. */
+typedef struct { unsigned char *g; int n; KT t2; } KPend;
 static Ast *kapp(AstPool *p, KT t1, KT t2) {
-    if (t1.n == 0) {
-        if (t2.n == 0) return kapp_ast(p, t1.d, t2.d);                                         /* d1 d2 */
-        if (kt_is_var0(t2)) return t1.d;                                                        /* eta: \x. d1 x = d1 */
-        if (kt_head(t2)) return kapp(p, kt_closed(kapp_ast(p, kcomb(p, AST_B), t1.d)), kt_tail(t2));   /* B d1 . */
-        return kapp(p, t1, kt_tail(t2));                                                        /* x unused on the right */
+    Stack pend = STACK_INIT(KPend);
+    Ast *r;
+#define KRET(x) do { r = (x); goto result; } while (0)
+#define KINNER(outer_g, outer_n, rest2, in1, in2) do { KPend k_ = { (outer_g), (outer_n), (rest2) }; STACK_PUSH(&pend, KPend, k_); t1 = (in1); t2 = (in2); goto next; } while (0)
+    for (;;) {
+    next:
+        if (t1.n == 0) {
+            if (t2.n == 0) KRET(kapp_ast(p, t1.d, t2.d));                                        /* d1 d2 */
+            if (kt_is_var0(t2)) KRET(t1.d);                                                       /* eta: \x. d1 x = d1 */
+            if (kt_head(t2)) { t1 = kt_closed(kapp_ast(p, kcomb(p, AST_B), t1.d)); t2 = kt_tail(t2); continue; }   /* B d1 . */
+            t2 = kt_tail(t2); continue;                                                           /* x unused on the right */
+        }
+        if (kt_is_var0(t1)) {
+            if (t2.n == 0) KRET(kapp_ast(p, kcomb(p, AST_T), t2.d));                             /* \x. x d2 = T d2 */
+            if (!kt_head(t2)) { t1 = kt_closed(kcomb(p, AST_T)); t2 = kt_tail(t2); continue; }
+        }
+        if (kt_head(t1)) {
+            if (t2.n == 0) { KT n1 = kt_closed(kapp_ast(p, kcomb(p, AST_R), t2.d)), n2 = kt_tail(t1); t1 = n1; t2 = n2; }   /* R d2 . */
+            else {
+                KT t1p = kt_tail(t1);
+                if (kt_head(t2)) KINNER(t1p.g, t1p.n, kt_tail(t2), kt_closed(kcomb(p, AST_S)), t1p);   /* S */
+                KINNER(t1p.g, t1p.n, kt_tail(t2), kt_closed(kcomb(p, AST_C)), t1p);                    /* C */
+            }
+            continue;
+        }
+        /* x unused on the left */
+        {
+            KT t1p = kt_tail(t1);
+            if (t2.n == 0) { t1 = t1p; continue; }
+            if (kt_is_var0(t2)) KRET(t1.d);                                                       /* eta */
+            if (kt_head(t2)) KINNER(t1p.g, t1p.n, kt_tail(t2), kt_closed(kcomb(p, AST_B)), t1p);  /* B */
+            t1 = t1p; t2 = kt_tail(t2); continue;
+        }
+    result:
+        if (!pend.n) break;
+        { KPend k = STACK_POP(&pend, KPend); t1 = kt(k.g, k.n, r); t2 = k.t2; }
     }
-    if (kt_is_var0(t1)) {
-        if (t2.n == 0) return kapp_ast(p, kcomb(p, AST_T), t2.d);                              /* \x. x d2 = T d2 */
-        if (!kt_head(t2)) return kapp(p, kt_closed(kcomb(p, AST_T)), kt_tail(t2));
-    }
-    if (kt_head(t1)) {
-        if (t2.n == 0) return kapp(p, kt_closed(kapp_ast(p, kcomb(p, AST_R), t2.d)), kt_tail(t1));    /* R d2 . */
-        KT t1p = kt_tail(t1);
-        if (kt_head(t2)) return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_S)), t1p)), kt_tail(t2));   /* S */
-        return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_C)), t1p)), kt_tail(t2));                  /* C */
-    }
-    /* x unused on the left */
-    KT t1p = kt_tail(t1);
-    if (t2.n == 0) return kapp(p, t1p, t2);
-    if (kt_is_var0(t2)) return t1.d;                                                            /* eta */
-    if (kt_head(t2)) return kapp(p, kt(t1p.g, t1p.n, kapp(p, kt_closed(kcomb(p, AST_B)), t1p)), kt_tail(t2));   /* B */
-    return kapp(p, t1p, kt_tail(t2));
+#undef KRET
+#undef KINNER
+    stack_drop(&pend);
+    return r;
 }
 /* the union of two bit lists */
 static unsigned char *g_union(const unsigned char *a, int na, const unsigned char *b, int nb, int *n) {
@@ -142,40 +172,59 @@ static unsigned char *g_union(const unsigned char *a, int na, const unsigned cha
     return g;
 }
 static Ast *expand_num(AstPool *pool, i64 n);
-static KT kconv(AstPool *p, Ast *e, bool *ok) {
-    switch (e->tag) {
-    case AST_VAR: {
-        int k = e->var.debruijn;
-        if (k < 0) { fprintf(stderr, "Error: free variable '%.*s' in term\n", e->var.name.len, e->var.name.str); *ok = false; return kt_closed(e); }
-        unsigned char *g = rmalloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
-        return kt(g, k + 1, ast_i(p, noloc));
+/* A subterm's (bits, combinator) pair, bottom up: an explicit machine on a heap stack, not C recursion. A frame waits
+   for its body (an abstraction) or its two sides (an application); a finished pair is handed to the frame below. */
+typedef struct { Ast *e; int st; KT t1; } KFrame;
+static KT kconv(AstPool *p, Ast *root, bool *ok) {
+    Stack st = STACK_INIT(KFrame);
+    KT ret = kt_closed(root); int have = 0;
+    KFrame f0 = { root, 0, { 0 } }; STACK_PUSH(&st, KFrame, f0);
+    while (st.n) {
+        KFrame *f = &STACK_TOP(&st, KFrame);
+        Ast *e = f->e;
+        if (!have) {
+            switch (e->tag) {
+            case AST_VAR: {
+                int k = e->var.debruijn;
+                if (k < 0) { fprintf(stderr, "Error: free variable '%.*s' in term\n", e->var.name.len, e->var.name.str); *ok = false; ret = kt_closed(e); goto out; }
+                unsigned char *g = rmalloc(k + 1); memset(g, 0, k + 1); g[k] = 1;
+                ret = kt(g, k + 1, ast_i(p, noloc)); st.n--; have = 1; continue;
+            }
+            case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R: case AST_WORD: case AST_PRIM:
+                ret = kt_closed(e); st.n--; have = 1; continue;
+            case AST_ABS: { KFrame c = { e->abs.body, 0, { 0 } }; STACK_PUSH(&st, KFrame, c); continue; }
+            case AST_APP: { KFrame c = { f->st == 0 ? e->app.func : e->app.arg, 0, { 0 } }; STACK_PUSH(&st, KFrame, c); continue; }
+            case AST_NUM: {   /* the numeral's expansion stands in for it */
+                Ast *acc = expand_num(p, e->num);
+                if (!resolve_rec(acc, NULL)) { *ok = false; ret = kt_closed(e); goto out; }
+                f->e = acc; continue;
+            }
+            case AST_LET:
+                fprintf(stderr, "Error: LET should be desugared before bracket abstraction\n"); *ok = false; ret = kt_closed(e); goto out;
+            case AST_STR:
+                fprintf(stderr, "Error: string literals should be desugared before bracket abstraction\n"); *ok = false; ret = kt_closed(e); goto out;
+            default:
+                *ok = false; ret = kt_closed(e); goto out;
+            }
+        }
+        have = 0;
+        if (e->tag == AST_ABS) {
+            KT b = ret;
+            if (b.n == 0) ret = kt_closed(kapp_ast(p, ast_k(p, noloc), b.d));                   /* \x. d = K d */
+            else if (!b.g[0]) { KT t = kt_tail(b); ret = kt(t.g, t.n, kapp(p, kt_closed(ast_k(p, noloc)), t)); }
+            else ret = kt_tail(b);
+            st.n--; have = 1; continue;
+        }
+        /* an application: its function done, then its argument */
+        if (f->st == 0) { f->t1 = ret; f->st = 1; continue; }
+        { KT t1 = f->t1, t2 = ret;
+          int n; unsigned char *g = g_union(t1.g, t1.n, t2.g, t2.n, &n);
+          ret = kt(g, n, kapp(p, t1, t2)); }
+        st.n--; have = 1;
     }
-    case AST_S: case AST_K: case AST_I: case AST_B: case AST_C: case AST_T: case AST_R: case AST_WORD: case AST_PRIM:
-        return kt_closed(e);
-    case AST_ABS: {
-        KT b = kconv(p, e->abs.body, ok);
-        if (!*ok) return b;
-        if (b.n == 0) return kt_closed(kapp_ast(p, ast_k(p, noloc), b.d));                    /* \x. d = K d */
-        if (!b.g[0]) { KT t = kt_tail(b); return kt(t.g, t.n, kapp(p, kt_closed(ast_k(p, noloc)), t)); }
-        return kt_tail(b);
-    }
-    case AST_APP: {
-        KT t1 = kconv(p, e->app.func, ok); if (!*ok) return t1;
-        KT t2 = kconv(p, e->app.arg, ok); if (!*ok) return t2;
-        int n; unsigned char *g = g_union(t1.g, t1.n, t2.g, t2.n, &n);
-        return kt(g, n, kapp(p, t1, t2));
-    }
-    case AST_NUM: {
-        Ast *acc = expand_num(p, e->num);
-        if (!resolve_rec(acc, NULL)) { *ok = false; return kt_closed(e); }
-        return kconv(p, acc, ok);
-    }
-    case AST_LET:
-        fprintf(stderr, "Error: LET should be desugared before bracket abstraction\n"); *ok = false; return kt_closed(e);
-    case AST_STR:
-        fprintf(stderr, "Error: string literals should be desugared before bracket abstraction\n"); *ok = false; return kt_closed(e);
-    }
-    *ok = false; return kt_closed(e);
+out:
+    stack_drop(&st);
+    return ret;
 }
 /* a numeral as a Church numeral built by binary expansion: O(log n) in size (ZERO, ONE, DBL, SUCC as closed lambdas) */
 static Ast *expand_num(AstPool *pool, i64 n) {
@@ -210,42 +259,53 @@ static Ast *expand_num(AstPool *pool, i64 n) {
     return acc;
 }
 
-/* Convert combinator-only AST to SKITerm */
-static SKITerm* comb_to_term(SKIPool *pool, Ast *comb) {
+/* Convert combinator-only AST to SKITerm: bottom up, an explicit machine on a heap stack (as kconv). NULL, with a
+   message, if something other than a combinator is met; the part built is released. */
+typedef struct { Ast *a; int st; SKITerm *f; } CFrame;
+static SKITerm* comb_leaf(SKIPool *pool, Ast *comb) {
     switch (comb->tag) {
-    case AST_S:
-        return ski_s(pool);
-    case AST_K:
-        return ski_k(pool);
-    case AST_I:
-        return ski_i(pool);
+    case AST_S: return ski_s(pool);
+    case AST_K: return ski_k(pool);
+    case AST_I: return ski_i(pool);
     case AST_B: return ski_b(pool);     /* native leaves; the pure formats spell them as S K trees at emission */
     case AST_C: return ski_c(pool);
     case AST_T: return ski_t(pool);
     case AST_R: return ski_r(pool);
     case AST_WORD: return ski_word(pool, comb->word);
     case AST_PRIM: return ski_prim(pool, comb->op);
-    case AST_APP: {
-        SKITerm *f = comb_to_term(pool, comb->app.func);
-        SKITerm *a = comb_to_term(pool, comb->app.arg);
-        if (!f || !a) return NULL;
-        return ski_app(pool, f, a);
-    }
     case AST_VAR:
-        fprintf(stderr, "Error: variable '%.*s' in combinator term\n",
-                comb->var.name.len, comb->var.name.str);
+        fprintf(stderr, "Error: variable '%.*s' in combinator term\n", comb->var.name.len, comb->var.name.str);
         return NULL;
-    case AST_ABS:
-        fprintf(stderr, "Error: abstraction in combinator term\n");
-        return NULL;
-    case AST_LET:
-        fprintf(stderr, "Error: let in combinator term\n");
-        return NULL;
-    case AST_NUM:
-    case AST_STR:
-        fprintf(stderr, "Error: literal in combinator term\n");
-        return NULL;
+    case AST_ABS: fprintf(stderr, "Error: abstraction in combinator term\n"); return NULL;
+    case AST_LET: fprintf(stderr, "Error: let in combinator term\n"); return NULL;
+    case AST_NUM: case AST_STR: fprintf(stderr, "Error: literal in combinator term\n"); return NULL;
+    default: return NULL;
     }
+}
+static SKITerm* comb_to_term(SKIPool *pool, Ast *root) {
+    Stack st = STACK_INIT(CFrame);
+    SKITerm *ret = NULL; int have = 0;
+    CFrame f0 = { root, 0, NULL }; STACK_PUSH(&st, CFrame, f0);
+    while (st.n) {
+        CFrame *f = &STACK_TOP(&st, CFrame);
+        if (!have) {
+            if (f->a->tag != AST_APP) {
+                ret = comb_leaf(pool, f->a); st.n--;
+                if (!ret) goto fail;
+                have = 1; continue;
+            }
+            CFrame c = { f->st == 0 ? f->a->app.func : f->a->app.arg, 0, NULL }; STACK_PUSH(&st, CFrame, c);
+            continue;
+        }
+        have = 0;
+        if (f->st == 0) { f->f = ret; f->st = 1; continue; }
+        ret = ski_app(pool, f->f, ret); st.n--; have = 1;
+    }
+    stack_drop(&st);
+    return ret;
+fail:
+    while (st.n) { CFrame f = STACK_POP(&st, CFrame); if (f.st == 1) ski_unref(pool, f.f); }
+    stack_drop(&st);
     return NULL;
 }
 

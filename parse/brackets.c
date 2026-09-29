@@ -1,3 +1,4 @@
+#include <libeezo/mem.h>
 #include <string.h>
 #include "tree.h"
 #include "opp/operator.h"
@@ -11,26 +12,33 @@ Node* prepend(Tag tag, Node* item, Node* list) {
         Name(newLiteralTag("::", getLexeme(tag).location, INFIX)), item), list);
 }
 
-static unsigned short getCommaListLength(Node* node) {
-    return !isCommaPair(node) ? 1 : 1 + getCommaListLength(getLeft(node));
+/* the comma list's elements, counted along its left spine (a loop) */
+static size_t getCommaListLength(Node* node) {
+    size_t n = 1;
+    for (; isCommaPair(node); node = getLeft(node)) n++;
+    return n;
 }
 
+/* base applied to the comma list's elements, left to right: the list's left spine folded from its bottom (a loop) */
 static Node* applyToCommaList(Tag tag, Node* base, Node* arguments) {
-    if (!isCommaPair(arguments))
-        return Juxtaposition(tag, base, arguments);
-    return Juxtaposition(tag, applyToCommaList(tag, base,
-        getLeft(arguments)), getRight(arguments));
+    Stack rights = STACK_INIT(Node*);
+    for (; isCommaPair(arguments); arguments = getLeft(arguments)) STACK_PUSH(&rights, Node*, getRight(arguments));
+    Node* acc = Juxtaposition(tag, base, arguments);
+    while (rights.n) acc = Juxtaposition(tag, acc, STACK_POP(&rights, Node*));
+    stack_drop(&rights);
+    return acc;
 }
 
-static Node* newSpineName(Tag tag, const char* name, unsigned short length) {
-    syntaxErrorIf(length > strlen(name), "too many arguments", tag);
-    Lexeme lexeme = newLexeme(name, length, getLexeme(tag).location);
+/* the name of the n-tuple's constructor: n - 1 commas, however many (a lexeme's length is its 32-bit field) */
+static Node* newSpineName(Tag tag, char c, size_t length) {
+    syntaxErrorIf(length > MAX_LEXEME_LENGTH, "too many arguments", tag);
+    char* name = rmalloc(length + 1); memset(name, c, length); name[length] = 0;   /* the lexeme's text lives on */
+    Lexeme lexeme = newLexeme(name, (unsigned int)length, getLexeme(tag).location);
     return Name(newTag(lexeme, NOFIX));
 }
 
 static Node* newTuple(Tag tag, Node* commaList) {
-    const char* lexeme = ",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,";
-    Node* name = newSpineName(tag, lexeme, getCommaListLength(commaList) - 1);
+    Node* name = newSpineName(tag, ',', getCommaListLength(commaList) - 1);
     return applyToCommaList(tag, name, commaList);
 }
 
@@ -58,8 +66,7 @@ Node* reduceOpenSquareBracket(Tag tag, Node* before, Node* contents) {
         return Nil(tag);
     }
     if (before != NULL) {
-        const char* lexeme = "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[";
-        Node* name = newSpineName(tag, lexeme, getCommaListLength(contents));
+        Node* name = newSpineName(tag, '[', getCommaListLength(contents));
         Node* base = Juxtaposition(tag, name, before);
         return applyToCommaList(tag, base, contents);
     }

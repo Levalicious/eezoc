@@ -7,19 +7,19 @@
 const Lexeme EMPTY = {.location={0}, .length=0, .start=""};
 /* the source files' names, by the index a Location carries (index 0: none): a Stack of the memory layer */
 static Stack FILENAMES = { NULL, 0, 0, sizeof(const char *) };
-unsigned short FILE_COUNT = 0;
+unsigned int FILE_COUNT = 0;
 
 /* File boundary mapping for concatenated sources: one per file, however many */
 typedef struct {
     const char *filename;
-    unsigned short start_line;  /* First line of this file (1-based, in concat) */
-    unsigned short import_count; /* Number of #import lines stripped */
+    unsigned int start_line;  /* First line of this file (1-based, in concat) */
+    unsigned int import_count; /* Number of #import lines stripped */
 } FileBoundary;
 static FileBoundary *file_boundaries = NULL;
 static int num_boundaries = 0;
 static void boundaries_room(int n) { file_boundaries = rrealloc(file_boundaries, (size_t)(n + 1) * sizeof(FileBoundary)); }
 
-void set_file_boundaries(int n, const char **filenames, const unsigned short *start_lines) {
+void set_file_boundaries(int n, const char **filenames, const unsigned int *start_lines) {
     boundaries_room(n); num_boundaries = n;
     for (int i = 0; i < num_boundaries; i++) {
         file_boundaries[i].filename = filenames[i];
@@ -28,8 +28,8 @@ void set_file_boundaries(int n, const char **filenames, const unsigned short *st
     }
 }
 
-void set_file_boundaries_ex(int n, const char **filenames, const unsigned short *start_lines,
-                            const unsigned short *import_counts) {
+void set_file_boundaries_ex(int n, const char **filenames, const unsigned int *start_lines,
+                            const unsigned int *import_counts) {
     boundaries_room(n); num_boundaries = n;
     for (int i = 0; i < num_boundaries; i++) {
         file_boundaries[i].filename = filenames[i];
@@ -39,7 +39,7 @@ void set_file_boundaries_ex(int n, const char **filenames, const unsigned short 
 }
 
 /* Map global line to (filename, local_line). Returns NULL if no mapping. */
-static const char *map_line_to_file(unsigned short global_line, unsigned short *local_line) {
+static const char *map_line_to_file(unsigned int global_line, unsigned int *local_line) {
     if (num_boundaries == 0) return NULL;
     
     /* Find which file contains this line */
@@ -54,25 +54,24 @@ static const char *map_line_to_file(unsigned short global_line, unsigned short *
     return NULL;
 }
 
-Lexeme newLexeme(const char* start, unsigned short length, Location location) {
+Lexeme newLexeme(const char* start, unsigned int length, Location location) {
     return (Lexeme){.location=location, .length=length, .start=start};
 }
 
 Lexeme newLiteralLexeme(const char* start, Location location) {
-    return newLexeme(start, (unsigned short)strlen(start), location);
+    return newLexeme(start, (unsigned int)strlen(start), location);
 }
 
-/* a file's index for its Locations. The index is a Location's 16-bit field: past that width a file gets 0, no name
-   (its diagnostics say less; nothing else depends on it) */
-unsigned short newFilename(const char* filename) {
-    if (FILE_COUNT == 0xFFFF) return 0;
+/* a file's index for its Locations (a Location's 32-bit field; past it a file gets 0, no name) */
+unsigned int newFilename(const char* filename) {
+    if (FILE_COUNT == 0xFFFFFFFFu) return 0;
     if (FILENAMES.n == 0) STACK_PUSH(&FILENAMES, const char *, NULL);   /* index 0: none */
     STACK_PUSH(&FILENAMES, const char *, filename);
     return ++FILE_COUNT;
 }
 
-Location newLocation(unsigned short file,
-        unsigned short line, unsigned short column) {
+Location newLocation(unsigned int file,
+        unsigned int line, unsigned int column) {
     return (Location){.file=file, .line=line, .column=column};
 }
 
@@ -95,14 +94,14 @@ static void printLine(const char* line, FILE* stream) {
 }
 
 void printLocation(Location location, FILE* stream) {
-    unsigned short line = location.line;
+    unsigned int line = location.line;
     const char *filename = NULL;
     
     if (location.file != 0) {
         filename = STACK_AT(&FILENAMES, const char *, location.file);
     } else {
         /* Try to map via file boundaries */
-        unsigned short local_line;
+        unsigned int local_line;
         filename = map_line_to_file(location.line, &local_line);
         if (filename) line = local_line;
     }

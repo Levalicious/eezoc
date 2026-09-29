@@ -34,8 +34,8 @@
 #endif
 
 /* Forward declaration - defined in parse/lexeme.c */
-void set_file_boundaries_ex(int n, const char **filenames, const unsigned short *start_lines,
-                            const unsigned short *import_counts);
+void set_file_boundaries_ex(int n, const char **filenames, const unsigned int *start_lines,
+                            const unsigned int *import_counts);
 
 bool TRACE = false;
 
@@ -203,36 +203,42 @@ static char *resolve_import(const char *base_path, const char *import_name) {
 }
 
 /* Toposort via DFS - returns 0 on success, -1 on cycle */
-static int toposort_visit(int idx, const char *base_path) {
-    if (FILE_AT(idx).visited == 2) return 0;  /* Already done */
-    if (FILE_AT(idx).visited == 1) {
-        fprintf(stderr, "Circular import: %s\n", FILE_AT(idx).path);
-        return -1;
-    }
-    
-    FILE_AT(idx).visited = 1;  /* Visiting */
-    
-    /* Visit dependencies first */
-    for (size_t i = 0; i < FILE_AT(idx).imports.n; i++) {
-        char *dep_path = resolve_import(FILE_AT(idx).path, STACK_AT(&FILE_AT(idx).imports, char *, i));
+/* Toposort by depth-first search - 0 on success, -1 on a cycle. The search is an explicit machine on a heap stack,
+   not C recursion (the import chain's depth is bounded by memory alone): a frame per file being visited and the index
+   of its next import; a file is placed after all its imports. */
+typedef struct { int idx; size_t next; } TopoFrame;
+static int toposort_visit(int root, const char *base_path) {
+    (void)base_path;
+    if (FILE_AT(root).visited == 2) return 0;  /* Already done */
+    Stack frames = STACK_INIT(TopoFrame);
+    int rc = 0;
+    FILE_AT(root).visited = 1;  /* Visiting */
+    TopoFrame f0 = { root, 0 }; STACK_PUSH(&frames, TopoFrame, f0);
+    while (frames.n) {
+        TopoFrame *f = &STACK_TOP(&frames, TopoFrame);
+        int idx = f->idx;
+        if (f->next == FILE_AT(idx).imports.n) {   /* all its dependencies placed: the file itself */
+            FILE_AT(idx).visited = 2;  /* Done */
+            STACK_PUSH(&sorted_files, char *, FILE_AT(idx).path);
+            frames.n--;
+            continue;
+        }
+        char *dep_path = resolve_import(FILE_AT(idx).path, STACK_AT(&FILE_AT(idx).imports, char *, f->next));
+        f->next++;
         int dep_idx = find_or_add_file(dep_path);
-        if (dep_idx < 0) {
-            free(dep_path);
-            return -1;
-        }
-        if (FILE_AT(dep_idx).imports.n == 0) {
-            scan_imports(dep_idx);
-        }
-        if (toposort_visit(dep_idx, FILE_AT(idx).path) < 0) {
-            free(dep_path);
-            return -1;
-        }
         free(dep_path);
+        if (dep_idx < 0) { rc = -1; break; }
+        if (FILE_AT(dep_idx).imports.n == 0) scan_imports(dep_idx);
+        if (FILE_AT(dep_idx).visited == 2) continue;  /* Already done */
+        if (FILE_AT(dep_idx).visited == 1) {
+            fprintf(stderr, "Circular import: %s\n", FILE_AT(dep_idx).path);
+            rc = -1; break;
+        }
+        FILE_AT(dep_idx).visited = 1;
+        TopoFrame c = { dep_idx, 0 }; STACK_PUSH(&frames, TopoFrame, c);
     }
-    
-    FILE_AT(idx).visited = 2;  /* Done */
-    STACK_PUSH(&sorted_files, char *, FILE_AT(idx).path);
-    return 0;
+    stack_drop(&frames);
+    return rc;
 }
 
 /* Build import graph and return toposorted file list */
@@ -288,10 +294,10 @@ static char *concat_files_strip_imports(int nfiles, char **paths) {
     /* Track file boundaries for error reporting */
     /* one boundary per file (the parse keeps its own copy: set_file_boundaries_ex) */
     const char **boundary_files = rmalloc((nfiles + 1) * sizeof(char *));
-    unsigned short *boundary_starts = rmalloc((nfiles + 1) * sizeof(unsigned short));
-    unsigned short *boundary_import_counts = rmalloc((nfiles + 1) * sizeof(unsigned short));
+    unsigned int *boundary_starts = rmalloc((nfiles + 1) * sizeof(unsigned int));
+    unsigned int *boundary_import_counts = rmalloc((nfiles + 1) * sizeof(unsigned int));
     int num_bounds = 0;
-    unsigned short current_line = 1;
+    unsigned int current_line = 1;
     
     /* Process files, skip import lines */
     char *p = buf;

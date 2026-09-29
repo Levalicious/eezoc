@@ -137,7 +137,7 @@ void addCoreSyntax(const char* symbol, Precedence precedence,
 void addBracketSyntax(const char* symbol, char type, Precedence outerPrecedence,
         Fixity fixity, Reducer reducer) {
     size_t length = symbol[0] == 0 && fixity == CLOSEFIX ? 1 : strlen(symbol);
-    Lexeme lexeme = newLexeme(symbol, (unsigned short)length, (Location){0});
+    Lexeme lexeme = newLexeme(symbol, (unsigned int)length, (Location){0});
     Precedence leftPrecedence = fixity == OPENFIX ? outerPrecedence : 0;
     Precedence rightPrecedence = fixity == OPENFIX ? 0 : outerPrecedence;
     appendSyntax((Syntax){lexeme, lexeme, EMPTY, type,
